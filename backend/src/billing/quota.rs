@@ -41,7 +41,7 @@ fn current_period_start() -> DateTime<Utc> {
 /// Fetch the user's plan tier. Defaults to Free if no subscription row exists.
 pub async fn get_plan(db: &PgPool, user_id: &str) -> Result<PlanTier, sqlx::Error> {
     let row: Option<(String, String)> = sqlx::query_as(
-        "SELECT plan_tier, status FROM subscriptions WHERE user_id = $1",
+        "SELECT plan_tier, status FROM subscriptions WHERE user_id::text = $1",
     )
     .bind(user_id)
     .fetch_optional(db)
@@ -70,9 +70,9 @@ pub async fn get_or_create_usage(db: &PgPool, user_id: &str) -> Result<UsageRow,
     .await?;
 
     sqlx::query_as::<_, UsageRow>(
-        "SELECT user_id, period_start, llm_intents, compiles, deploys, devices_active, updated_at
+        "SELECT user_id::text as user_id, period_start, llm_intents, compiles, deploys, devices_active, updated_at
          FROM usage_counters
-         WHERE user_id = $1 AND period_start = $2",
+         WHERE user_id::text = $1 AND period_start = $2",
     )
     .bind(user_id)
     .bind(period)

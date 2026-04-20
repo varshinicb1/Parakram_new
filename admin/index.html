@@ -980,6 +980,13 @@
           <span>All Drivers</span>
         </div>
 
+        <div class="nav-section-label" style="margin-top:8px">Billing</div>
+        <div class="nav-item" data-page="payments" onclick="Admin.navigate('payments')">
+          <span class="nav-icon">💰</span>
+          <span>UPI Payments</span>
+          <span class="nav-badge zero" id="paymentsBadge">0</span>
+        </div>
+
         <div class="nav-section-label" style="margin-top:8px">Management</div>
         <div class="nav-item" data-page="users" onclick="Admin.navigate('users')">
           <span class="nav-icon">👥</span>
@@ -1166,6 +1173,36 @@
             <div class="empty-state">
               <div class="empty-icon">⌛</div>
               <div class="empty-title">Loading…</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── PAYMENTS ─── -->
+        <div class="page-view" id="page-payments">
+          <div class="page-header">
+            <div class="page-title">UPI Payment Claims</div>
+            <div class="page-sub">Verify and approve UTR-based payments to upgrade users to Maker tier.</div>
+          </div>
+          <div class="card">
+            <div class="table-toolbar">
+              <button class="btn btn-ghost" style="flex-shrink:0" onclick="Admin.loadPayments()">↻ Refresh</button>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Claim ID</th>
+                    <th>User ID</th>
+                    <th>UTR</th>
+                    <th>Amount</th>
+                    <th>Submitted</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="paymentsTableBody">
+                  <tr><td colspan="6"><div class="empty-state"><div class="empty-icon">⌛</div><div class="empty-title">Loading…</div></div></td></tr>
+                </tbody>
+              </table>
             </div>
           </div>
         </div>

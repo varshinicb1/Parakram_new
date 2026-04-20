@@ -99,6 +99,7 @@ const Admin = (() => {
     dashboard: 'Dashboard',
     pending: 'Pending Review',
     'all-drivers': 'All Drivers',
+    payments: 'UPI Payments',
     users: 'Users',
     system: 'System',
   };
@@ -123,6 +124,7 @@ const Admin = (() => {
       case 'dashboard':   loadDashboard(); break;
       case 'pending':     loadPending(); break;
       case 'all-drivers': loadAllDrivers(); break;
+      case 'payments':    loadPayments(); break;
       case 'users':       loadUsers(); break;
       case 'system':      loadHealth(); loadMetrics(); break;
     }
@@ -810,6 +812,67 @@ const Admin = (() => {
       .replace(/\b(\d+)\b/g, '<span class="num">$1</span>');
   }
 
+  // ── UPI Payments ──────────────────────────────────────────────────────────
+
+  async function loadPayments() {
+    const tbody = document.getElementById('paymentsTableBody');
+    tbody.innerHTML = skeletonRows(3, 6);
+    try {
+      const res = await apiFetch('/api/billing/admin/pending', 'GET');
+      if (!res.ok) throw new Error(`${res.status}`);
+      const claims = await res.json();
+
+      updateBadge('paymentsBadge', claims.length);
+
+      if (!claims.length) {
+        tbody.innerHTML = emptyRow(6, 'No pending payment claims — all caught up! ✅');
+        return;
+      }
+
+      tbody.innerHTML = claims.map(c => `
+        <tr>
+          <td class="td-mono">${c.id}</td>
+          <td class="td-mono">${esc(c.user_id)}</td>
+          <td class="td-mono" style="color:var(--secondary);font-weight:600">${esc(c.upi_utr)}</td>
+          <td>₹${c.amount_inr}</td>
+          <td class="td-mono">${formatDate(c.submitted_at)}</td>
+          <td onclick="event.stopPropagation()">
+            <div class="row-actions">
+              <button class="btn-approve" onclick="Admin.approvePayment(${c.id})">✓ Approve</button>
+              <button class="btn-reject" onclick="Admin.rejectPayment(${c.id})">✕ Reject</button>
+            </div>
+          </td>
+        </tr>
+      `).join('');
+    } catch (e) {
+      tbody.innerHTML = emptyRow(6, `Could not load payment claims: ${e.message}`);
+    }
+  }
+
+  async function approvePayment(claimId) {
+    try {
+      const res = await apiFetch('/api/billing/admin/approve', 'POST', { claim_id: claimId });
+      if (!res.ok) throw new Error(`${res.status}`);
+      const data = await res.json();
+      toast(data.message || 'Payment approved — user upgraded to Maker tier', 'success');
+      loadPayments();
+    } catch (e) {
+      toast(`Approve failed: ${e.message}`, 'error');
+    }
+  }
+
+  async function rejectPayment(claimId) {
+    if (!confirm('Reject this payment claim?')) return;
+    try {
+      const res = await apiFetch('/api/billing/admin/reject', 'POST', { claim_id: claimId });
+      if (!res.ok) throw new Error(`${res.status}`);
+      toast('Payment claim rejected', 'info');
+      loadPayments();
+    } catch (e) {
+      toast(`Reject failed: ${e.message}`, 'error');
+    }
+  }
+
   // ── Keyboard shortcuts ─────────────────────────────────────────────────────
 
   document.addEventListener('keydown', e => {
@@ -831,6 +894,9 @@ const Admin = (() => {
     loadPending,
     loadAllDrivers,
     loadUsers,
+    loadPayments,
+    approvePayment,
+    rejectPayment,
     loadHealth,
     loadMetrics,
     filterPending,

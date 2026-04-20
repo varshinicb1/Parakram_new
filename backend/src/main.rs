@@ -73,6 +73,32 @@ async fn main() -> anyhow::Result<()> {
     let db = PgPool::connect(&database_url).await?;
     db::check_connection(&db).await?;
     tracing::info!("Database connected");
+
+    // Auto-migrate: ensure UPI billing tables exist
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS payment_claims (
+            id BIGSERIAL PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            upi_utr TEXT UNIQUE NOT NULL,
+            amount_inr INTEGER NOT NULL,
+            status TEXT DEFAULT 'pending',
+            submitted_at TIMESTAMPTZ DEFAULT NOW(),
+            reviewed_at TIMESTAMPTZ,
+            reviewed_by TEXT
+        )"
+    ).execute(&db).await?;
+
+    // Patch subscriptions table with UPI columns (safe if they already exist)
+    for col_sql in &[
+        "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS upi_utr TEXT",
+        "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS payment_verified BOOLEAN DEFAULT false",
+        "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ",
+        "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS plan_tier TEXT DEFAULT 'free'",
+    ] {
+        let _ = sqlx::query(col_sql).execute(&db).await;
+    }
+    tracing::info!("Auto-migration complete");
+
     db::seed_defaults(&db).await?;
 
     let driver_registry = Arc::new(DriverRegistry::new());
