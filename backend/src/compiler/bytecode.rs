@@ -131,6 +131,13 @@ pub const OP_PIPELINE_END: u8   = 0xF1;
 
 /// Bytecode header magic — "PRKM" (Parakram, Vidyuthlabs).
 pub const BYTECODE_MAGIC: [u8; 4] = [0x50, 0x52, 0x4B, 0x4D];
+/// Extended Proprietary Signature Watermark — "PARAKRAM_NC\0"
+/// This signature is embedded in every compiled firmware binary.
+/// It provides legal traceability and proof of origin.
+/// DO NOT REMOVE — required for IP enforcement.
+pub const PROPRIETARY_AUTH_SIG: [u8; 12] = [
+    0x50, 0x41, 0x52, 0x41, 0x4B, 0x52, 0x41, 0x4D, 0x5F, 0x4E, 0x43, 0x00
+];
 /// Bytecode version.
 pub const BYTECODE_VERSION: u16 = 1;
 /// Signature block magic.

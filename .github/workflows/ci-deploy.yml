@@ -1,0 +1,90 @@
+name: Build & Deploy Parakram
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  # ── Backend CI ─────────────────────────────────────────────
+  backend:
+    name: Backend Build & Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "backend -> target"
+
+      - name: Check Formatting
+        run: cd backend && cargo fmt -- --check
+
+      - name: Compile Check
+        run: cd backend && cargo check
+
+      - name: Run Tests
+        run: cd backend && cargo test --verbose
+
+  # ── Firmware CI ────────────────────────────────────────────
+  firmware:
+    name: Firmware Build (ESP32-S3)
+    runs-on: ubuntu-latest
+    if: contains(github.event.head_commit.message, 'firmware') || contains(github.event.head_commit.modified, 'firmware/')
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Build Firmware
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.1
+          target: esp32s3
+          path: 'firmware'
+
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: parakram-firmware-esp32s3
+          path: |
+            firmware/build/*.bin
+
+  # ── Deploy to GitHub Pages ─────────────────────────────────
+  deploy:
+    name: Deploy to GitHub Pages
+    runs-on: ubuntu-latest
+    needs: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install Material for MkDocs
+        run: pip install mkdocs-material
+
+      - name: Build Documentation
+        run: mkdocs build
+
+      - name: Merge Playground into Site
+        run: |
+          cp -R playground/* site/
+          cp -R admin/ site/admin/ 2>/dev/null || true
+
+      - name: Deploy to gh-pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./site

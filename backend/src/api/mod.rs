@@ -7,6 +7,7 @@ pub mod configurator;
 pub mod devices;
 pub mod fleet;
 pub mod ir;
+pub mod issues;
 pub mod llm;
 pub mod marketplace;
 pub mod notifications;
@@ -87,6 +88,7 @@ pub fn router() -> Router<AppState> {
         .nest("/telemetry", telemetry_ws::router())
         .nest("/fleet", fleet::router())
         .nest("/users", users::router())
+        .nest("/issues", issues::router())
         .route("/templates", get(list_templates))
 }
 

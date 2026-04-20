@@ -231,8 +231,8 @@ fn driver_item_from_full(d: &marketplace::CommunityDriverFull) -> DriverItem {
     }
 }
 
-/// Enforce that the caller is on Hobby or higher; 402 otherwise.
-async fn require_hobby_plus(
+/// Enforce that the caller is on Maker tier; 402 otherwise.
+async fn require_maker_plus(
     db: &sqlx::PgPool,
     user_id: &str,
 ) -> Result<(), (StatusCode, Json<ErrorBody>)> {
@@ -243,7 +243,7 @@ async fn require_hobby_plus(
             Json(ErrorBody {
                 error: ErrorDetail {
                     code:    "PLAN_REQUIRED".into(),
-                    message: "upgrade to Hobby or Pro to submit community drivers".into(),
+                    message: "upgrade to Maker ($1.50/mo) to submit community drivers".into(),
                 },
             }),
         ));
@@ -316,7 +316,7 @@ async fn get_source(
     Path(id): Path<Uuid>,
 ) -> Result<Json<SourceResponse>, (StatusCode, Json<ErrorBody>)> {
     let claims = auth(&state, &headers)?;
-    require_hobby_plus(&state.db, &claims.sub).await?;
+    require_maker_plus(&state.db, &claims.sub).await?;
 
     let driver = mdb::get_by_id(&state.db, id)
         .await
@@ -340,7 +340,7 @@ async fn submit_driver(
     Json(body): Json<SubmitBody>,
 ) -> Result<(StatusCode, Json<SubmitResponse>), (StatusCode, Json<ErrorBody>)> {
     let claims = auth(&state, &headers)?;
-    require_hobby_plus(&state.db, &claims.sub).await?;
+    require_maker_plus(&state.db, &claims.sub).await?;
 
     // Collect official driver names from the in-memory registry.
     let all_specs = state.driver_registry.list_all();

@@ -178,5 +178,6 @@ Physical hardware (sensors, actuators, displays)
 
 **Vidyuthlabs** — vidyuthlabs.co.in  
 Product: **Parakram**  
-License: MIT (open source)  
+License: PolyForm Noncommercial 1.0.0
 Target: 2M customers building IoT products in natural language
+Pricing: Free (2 projects) + Maker ($1.50/month, unlimited projects)

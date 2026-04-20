@@ -674,6 +674,9 @@
       Parakram
     </a>
     <div class="nav-right">
+      <a href="/lvgl.html" style="color:var(--text-2);text-decoration:none;font-size:13px;margin-right:12px">LVGL Studio</a>
+      <a href="/flasher.html" style="color:var(--text-2);text-decoration:none;font-size:13px;margin-right:12px">WebFlasher</a>
+      <button class="btn-login" style="background:transparent;border:1px solid rgba(255,255,255,0.15);font-size:12px;padding:6px 12px;cursor:pointer;color:var(--text-2);border-radius:6px;margin-right:8px" onclick="openIssueModal()">🐛 Report Issue</button>
       <div class="status-badge offline" id="statusBadge">
         <div class="status-dot"></div>
         <span id="statusLabel">Checking…</span>
@@ -930,8 +933,86 @@
     </div>
   </div>
 
-  <!-- Toast container -->
-  <div class="toast-wrap" id="toastWrap"></div>
+  <!-- Issue Report Modal -->
+  <div id="issueModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9999;display:none;align-items:center;justify-content:center">
+    <div style="background:#13132a;border:1px solid rgba(255,255,255,0.1);border-radius:16px;padding:32px;max-width:480px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,0.6)">
+      <h3 style="margin:0 0 4px;font-size:18px;color:#f4f4fb">🐛 Report an Issue</h3>
+      <p style="margin:0 0 20px;font-size:13px;color:#8888aa">Issues are emailed directly to the Parakram team.</p>
+      <input id="issueTitle" type="text" placeholder="Issue title" style="width:100%;padding:10px 14px;background:#0a0a1a;border:1px solid rgba(255,255,255,0.1);border-radius:8px;color:#f4f4fb;font-size:14px;margin-bottom:10px;box-sizing:border-box">
+      <textarea id="issueDesc" rows="5" placeholder="Describe the issue in detail..." style="width:100%;padding:10px 14px;background:#0a0a1a;border:1px solid rgba(255,255,255,0.1);border-radius:8px;color:#f4f4fb;font-size:14px;resize:vertical;margin-bottom:10px;box-sizing:border-box;font-family:inherit"></textarea>
+      <input id="issueEmail" type="email" placeholder="Your email (optional)" style="width:100%;padding:10px 14px;background:#0a0a1a;border:1px solid rgba(255,255,255,0.1);border-radius:8px;color:#f4f4fb;font-size:14px;margin-bottom:10px;box-sizing:border-box">
+      <select id="issueSeverity" style="width:100%;padding:10px 14px;background:#0a0a1a;border:1px solid rgba(255,255,255,0.1);border-radius:8px;color:#f4f4fb;font-size:14px;margin-bottom:16px;box-sizing:border-box">
+        <option value="low">Low — cosmetic / minor</option>
+        <option value="medium" selected>Medium — broken feature</option>
+        <option value="high">High — can't use the platform</option>
+        <option value="critical">Critical — data loss / security</option>
+      </select>
+      <div style="display:flex;gap:10px">
+        <button onclick="closeIssueModal()" style="flex:1;padding:10px;background:transparent;border:1px solid rgba(255,255,255,0.15);border-radius:8px;color:#8888aa;cursor:pointer;font-size:14px">Cancel</button>
+        <button id="issueSubmitBtn" onclick="submitIssue()" style="flex:2;padding:10px;background:linear-gradient(135deg,#7c6cf0,#5b8cf0);border:none;border-radius:8px;color:white;cursor:pointer;font-size:14px;font-weight:600">Submit Issue</button>
+      </div>
+      <p id="issueStatus" style="margin:12px 0 0;font-size:12px;color:#34d399;display:none;text-align:center"></p>
+    </div>
+  </div>
+
+  <script>
+  function openIssueModal() {
+    const m = document.getElementById('issueModal');
+    m.style.display = 'flex';
+    document.getElementById('issueTitle').focus();
+  }
+  function closeIssueModal() {
+    document.getElementById('issueModal').style.display = 'none';
+    document.getElementById('issueTitle').value = '';
+    document.getElementById('issueDesc').value = '';
+    document.getElementById('issueEmail').value = '';
+    document.getElementById('issueStatus').style.display = 'none';
+  }
+  async function submitIssue() {
+    const title = document.getElementById('issueTitle').value.trim();
+    const desc = document.getElementById('issueDesc').value.trim();
+    const email = document.getElementById('issueEmail').value.trim();
+    const severity = document.getElementById('issueSeverity').value;
+    const status = document.getElementById('issueStatus');
+    const btn = document.getElementById('issueSubmitBtn');
+
+    if (!title || !desc) {
+      status.textContent = 'Please fill in both title and description.';
+      status.style.color = '#ef4444';
+      status.style.display = 'block';
+      return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = 'Sending...';
+
+    try {
+      const baseUrl = localStorage.getItem('pk_base_url') || 'http://localhost:8400';
+      const res = await fetch(baseUrl + '/api/issues/report', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title, description: desc,
+          reporter_email: email || null,
+          page: window.location.pathname,
+          severity
+        })
+      });
+      const data = await res.json();
+      status.textContent = data.message || 'Issue submitted!';
+      status.style.color = '#34d399';
+      status.style.display = 'block';
+      setTimeout(() => closeIssueModal(), 2500);
+    } catch (e) {
+      status.textContent = 'Failed to submit. Please email varshinicb@vidyuthlabs.co.in directly.';
+      status.style.color = '#ef4444';
+      status.style.display = 'block';
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Submit Issue';
+    }
+  }
+  </script>
 
   <script src="app.js"></script>
 </body>

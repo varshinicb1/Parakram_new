@@ -83,6 +83,11 @@ impl EmailService {
         self.send(to_email, subject, &body).await
     }
 
+    /// Forward issue reports to the founder's inbox.
+    pub async fn send_issue_report(&self, to: &str, subject: &str, body: &str) -> Result<(), String> {
+        self.send(to, subject, body).await
+    }
+
     /// Generic send — SendGrid preferred, falls back to log.
     async fn send(&self, to: &str, subject: &str, body: &str) -> Result<(), String> {
         match &self.sendgrid_key {

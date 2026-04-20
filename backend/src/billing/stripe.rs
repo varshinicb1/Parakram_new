@@ -133,12 +133,10 @@ pub struct Price {
 }
 
 /// Given a Stripe price ID, figure out which PlanTier it maps to.
-/// Relies on env vars STRIPE_PRICE_HOBBY / STRIPE_PRICE_PRO.
+/// Relies on env var STRIPE_PRICE_MAKER.
 pub fn tier_for_price(price_id: &str) -> crate::billing::PlanTier {
-    if Some(price_id.to_string()) == std::env::var("STRIPE_PRICE_PRO").ok() {
-        crate::billing::PlanTier::Pro
-    } else if Some(price_id.to_string()) == std::env::var("STRIPE_PRICE_HOBBY").ok() {
-        crate::billing::PlanTier::Hobby
+    if Some(price_id.to_string()) == std::env::var("STRIPE_PRICE_MAKER").ok() {
+        crate::billing::PlanTier::Maker
     } else {
         crate::billing::PlanTier::Free
     }

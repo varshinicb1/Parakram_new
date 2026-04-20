@@ -216,7 +216,7 @@ fn upstream_err(code: &str, msg: &str) -> (StatusCode, Json<ErrorBody>) {
 struct SubscriptionView {
     tier: String,
     display_name: String,
-    monthly_price_usd: u32,
+    monthly_price_usd: f32,
     status: String,
     current_period_end: Option<chrono::DateTime<chrono::Utc>>,
     cancel_at_period_end: bool,

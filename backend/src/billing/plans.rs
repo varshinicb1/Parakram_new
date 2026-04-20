@@ -1,8 +1,7 @@
 //! Plan definitions — single source of truth for quotas and pricing.
 //!
-//! Stripe price IDs are read from environment variables so the same binary
-//! works across dev/staging/prod without recompiling. Missing price IDs are
-//! OK at startup (we only need them when a checkout is requested).
+//! Parakram pricing: Free (2 projects) + Maker ($1.50/mo, unlimited).
+//! Stripe price ID read from STRIPE_PRICE_MAKER env var.
 
 use serde::{Deserialize, Serialize};
 
@@ -10,49 +9,39 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "lowercase")]
 pub enum PlanTier {
     Free,
-    Hobby,
-    Pro,
-    Enterprise,
+    Maker,
 }
 
 impl PlanTier {
     pub fn as_str(&self) -> &'static str {
         match self {
-            PlanTier::Free       => "free",
-            PlanTier::Hobby      => "hobby",
-            PlanTier::Pro        => "pro",
-            PlanTier::Enterprise => "enterprise",
+            PlanTier::Free  => "free",
+            PlanTier::Maker => "maker",
         }
     }
 
     pub fn from_str(s: &str) -> Self {
         match s {
-            "hobby"      => PlanTier::Hobby,
-            "pro"        => PlanTier::Pro,
-            "enterprise" => PlanTier::Enterprise,
-            _            => PlanTier::Free,
+            "maker" => PlanTier::Maker,
+            _       => PlanTier::Free,
         }
     }
 
     /// Stripe price ID, sourced from env vars.
-    /// Return `None` for Free (no Stripe plan) and Enterprise (sales-led).
     pub fn stripe_price_id(&self) -> Option<String> {
         match self {
-            PlanTier::Hobby => std::env::var("STRIPE_PRICE_HOBBY").ok(),
-            PlanTier::Pro   => std::env::var("STRIPE_PRICE_PRO").ok(),
+            PlanTier::Maker => std::env::var("STRIPE_PRICE_MAKER").ok(),
             _               => None,
         }
     }
 }
 
-/// Plan is only ever serialized out (plan catalog → JSON); we never
-/// deserialize it on the backend, so we keep the static refs without
-/// implementing Deserialize.
 #[derive(Debug, Clone, Serialize)]
 pub struct Plan {
     pub tier: PlanTier,
     pub display_name: &'static str,
-    pub monthly_price_usd: u32,
+    pub monthly_price_usd: f32,
+    pub max_projects: i32,
     pub llm_intents_per_month: i32,
     pub compiles_per_month: i32,
     pub deploys_per_month: i32,
@@ -61,76 +50,47 @@ pub struct Plan {
     pub features: &'static [&'static str],
 }
 
-/// Canonical plan catalog. Add new plans here.
+/// Canonical plan catalog.
 pub fn catalog() -> Vec<Plan> {
     vec![
         Plan {
             tier: PlanTier::Free,
             display_name: "Free",
-            monthly_price_usd: 0,
-            llm_intents_per_month: 20,
-            compiles_per_month: 50,
-            deploys_per_month: 10,
-            max_devices: 1,
-            support: "Community",
+            monthly_price_usd: 0.0,
+            max_projects: 2,
+            llm_intents_per_month: 50,
+            compiles_per_month: 100,
+            deploys_per_month: 20,
+            max_devices: 2,
+            support: "Community (GitHub Issues)",
             features: &[
-                "Web playground",
-                "1 device",
-                "All 59 drivers",
+                "2 projects",
+                "2 devices",
+                "All 63 drivers",
                 "Bytecode compilation",
+                "LVGL Visual Designer",
+                "WebSerial flasher",
             ],
         },
         Plan {
-            tier: PlanTier::Hobby,
-            display_name: "Hobby",
-            monthly_price_usd: 9,
+            tier: PlanTier::Maker,
+            display_name: "Maker",
+            monthly_price_usd: 1.50,
+            max_projects: -1, // unlimited
             llm_intents_per_month: 500,
-            compiles_per_month: 2_000,
-            deploys_per_month: 500,
-            max_devices: 5,
-            support: "Email",
+            compiles_per_month: 5_000,
+            deploys_per_month: 1_000,
+            max_devices: 10,
+            support: "Email (varshinicb@vidyuthlabs.co.in)",
             features: &[
-                "5 devices",
+                "Unlimited projects",
+                "10 devices",
                 "Everything in Free",
-                "Email support",
-                "Project templates",
-                "ROS 2 node graph generator",
-            ],
-        },
-        Plan {
-            tier: PlanTier::Pro,
-            display_name: "Pro",
-            monthly_price_usd: 29,
-            llm_intents_per_month: 10_000,
-            compiles_per_month: 50_000,
-            deploys_per_month: 10_000,
-            max_devices: 50,
-            support: "Priority email + Slack",
-            features: &[
-                "50 devices",
-                "Everything in Hobby",
-                "Priority support",
-                "Fleet coordination",
-                "OTA updates",
-                "Mobile app sync",
-            ],
-        },
-        Plan {
-            tier: PlanTier::Enterprise,
-            display_name: "Enterprise",
-            monthly_price_usd: 0, // Custom pricing
-            llm_intents_per_month: -1, // unlimited
-            compiles_per_month: -1,
-            deploys_per_month: -1,
-            max_devices: -1,
-            support: "Dedicated CSM + SLA",
-            features: &[
-                "Unlimited devices",
-                "Everything in Pro",
-                "99.9% SLA",
-                "On-prem deployment option",
-                "Custom driver development",
-                "24×7 phone support",
+                "Priority email support",
+                "OTA firmware updates",
+                "Fleet dashboard",
+                "Project sync across devices",
+                "Community driver marketplace",
             ],
         },
     ]

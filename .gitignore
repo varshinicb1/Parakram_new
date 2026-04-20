@@ -40,3 +40,4 @@ external_tools/
 *.log
 release_artifacts/server.log
 release_artifacts/dogfood.result
+firmware/components/lvgl/
