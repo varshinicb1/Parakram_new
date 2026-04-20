@@ -131,7 +131,7 @@ pub async fn increment_usage(
     let sql = format!(
         "UPDATE usage_counters
          SET {col} = {col} + 1, updated_at = NOW()
-         WHERE user_id = $1 AND period_start = $2",
+         WHERE user_id::text = $1 AND period_start = $2",
         col = column
     );
     sqlx::query(&sql)

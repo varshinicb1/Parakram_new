@@ -17,8 +17,9 @@ pub fn router() -> Router<AppState> {
 #[derive(Debug, Deserialize)]
 pub struct IntentRequest {
     pub description: String,
+    #[serde(alias = "boardId")]
     pub board_id: String,
-    #[serde(default)]
+    #[serde(default, alias = "deviceId")]
     pub device_id: Option<String>,
     #[serde(default)]
     pub context: Option<String>,
@@ -84,7 +85,7 @@ async fn process_intent(
 
     // Resolve LLM key: user's own key takes priority over server-wide key.
     let user_key: Option<String> = sqlx::query_scalar(
-        "SELECT llm_api_key FROM users WHERE user_id = $1"
+        "SELECT llm_api_key FROM users WHERE user_id::text = $1"
     )
     .bind(&claims.sub)
     .fetch_optional(&state.db).await
