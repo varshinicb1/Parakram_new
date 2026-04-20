@@ -1,8 +1,8 @@
 site_name: Parakram Hardware Compiler
-site_description: Zero-Code Autonomous Hardware Compilation
-site_url: https://parakram.github.io/
-repo_url: https://github.com/parakram/parakram
-repo_name: parakram/parakram
+site_description: Zero-Code Autonomous Hardware Compilation — by Vidyuthlabs
+site_url: https://varshinicb1.github.io/Parakram_new/
+repo_url: https://github.com/varshinicb1/Parakram_new
+repo_name: Parakram
 edit_uri: edit/main/docs/
 
 theme:
