@@ -4,7 +4,7 @@ version = "1.0.0"
 edition = "2021"
 authors = ["Vidyuthlabs <engineering@vidyuthlabs.com>"]
 description = "Parakram local backend — IR validation, bytecode compilation, LLM integration"
-license = "MIT"
+license = "LicenseRef-PolyForm-Noncommercial-1.0.0"
 
 [dependencies]
 # Web framework
@@ -53,7 +53,7 @@ anyhow = "1"
 # CRC
 crc32fast = "1"
 
-# Hex encoding (Stripe webhook signature verification)
+# Hex encoding
 hex = "0.4"
 
 # Misc
