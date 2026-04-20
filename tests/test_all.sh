@@ -139,7 +139,7 @@ else
 fi
 
 # ============================================================================
-header "5. BILLING (Stripe)"
+header "5. BILLING (UPI)"
 # ============================================================================
 
 # 5a. List plans
@@ -158,26 +158,31 @@ else
     FAIL=$((FAIL+1))
 fi
 
-# 5b. Verify Maker plan price is $1.50
+# 5b. Verify Maker plan price is ₹125
 MAKER_PRICE=$(echo "$BODY" | python3 -c "import sys,json; plans=json.load(sys.stdin); print([p['monthly_price_usd'] for p in plans if p['tier']=='maker'][0])" 2>/dev/null || echo "0")
 TOTAL=$((TOTAL+1))
 if [ "$MAKER_PRICE" = "1.5" ]; then
-    green "Maker plan price: \$$MAKER_PRICE/month"
+    green "Maker plan price: \$${MAKER_PRICE}/month (₹125)"
     PASS=$((PASS+1))
 else
-    red "Maker plan price: \$$MAKER_PRICE (expected 1.5)"
+    red "Maker plan price: \$${MAKER_PRICE} (expected 1.5)"
     FAIL=$((FAIL+1))
 fi
 
-# 5c. Check subscription status (requires auth)
-RESP=$(curl -s -w "\n%{http_code}" "$BASE/billing/me" -H "$AUTH")
+# 5c. Get UPI link (auth required)
+RESP=$(curl -s -w "\n%{http_code}" "$BASE/billing/upi-link" -H "$AUTH")
 STATUS=$(echo "$RESP" | tail -1)
 TOTAL=$((TOTAL+1))
-if [ "$STATUS" = "200" ] || [ "$STATUS" = "401" ]; then
-    green "GET /billing/me returns $STATUS (auth-gated)"
+if [ "$STATUS" = "200" ]; then
+    BODY=$(echo "$RESP" | head -n -1)
+    UPI_ID=$(echo "$BODY" | python3 -c "import sys,json; print(json.load(sys.stdin).get('upi_id',''))" 2>/dev/null || echo "")
+    green "GET /billing/upi-link returns UPI ID: $UPI_ID"
+    PASS=$((PASS+1))
+elif [ "$STATUS" = "401" ]; then
+    green "GET /billing/upi-link properly auth-gated ($STATUS)"
     PASS=$((PASS+1))
 else
-    red "GET /billing/me unexpected $STATUS"
+    red "GET /billing/upi-link unexpected $STATUS"
     FAIL=$((FAIL+1))
 fi
 
