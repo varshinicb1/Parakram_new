@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS user_profiles (
 
 -- 2. Subscriptions (UPI-based)
 CREATE TABLE IF NOT EXISTS subscriptions (
-    user_id TEXT PRIMARY KEY REFERENCES user_profiles(user_id),
+    user_id TEXT PRIMARY KEY,
     plan_tier TEXT DEFAULT 'free',
     status TEXT DEFAULT 'active',
     upi_utr TEXT,
@@ -26,10 +26,17 @@ CREATE TABLE IF NOT EXISTS subscriptions (
     expires_at TIMESTAMPTZ
 );
 
+-- Patch existing subscriptions table (if it was created by old Stripe setup)
+ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS upi_utr TEXT;
+ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS payment_verified BOOLEAN DEFAULT false;
+ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ;
+ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS plan_tier TEXT DEFAULT 'free';
+ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'active';
+
 -- 3. Payment Claims (UPI UTR verification)
 CREATE TABLE IF NOT EXISTS payment_claims (
     id BIGSERIAL PRIMARY KEY,
-    user_id TEXT NOT NULL REFERENCES user_profiles(user_id),
+    user_id TEXT NOT NULL,
     upi_utr TEXT UNIQUE NOT NULL,
     amount_inr INTEGER NOT NULL,
     status TEXT DEFAULT 'pending', -- pending, approved, rejected
@@ -106,7 +113,7 @@ CREATE TABLE IF NOT EXISTS community_drivers (
 -- 8. Driver Ratings
 CREATE TABLE IF NOT EXISTS driver_ratings (
     user_id TEXT NOT NULL,
-    driver_id UUID NOT NULL REFERENCES community_drivers(id),
+    driver_id UUID NOT NULL,
     stars INTEGER NOT NULL CHECK (stars BETWEEN 1 AND 5),
     review TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -116,7 +123,7 @@ CREATE TABLE IF NOT EXISTS driver_ratings (
 -- 9. Driver Installs
 CREATE TABLE IF NOT EXISTS driver_installs (
     user_id TEXT NOT NULL,
-    driver_id UUID NOT NULL REFERENCES community_drivers(id),
+    driver_id UUID NOT NULL,
     installed_at TIMESTAMPTZ DEFAULT NOW(),
     PRIMARY KEY (user_id, driver_id)
 );
@@ -143,7 +150,6 @@ CREATE INDEX IF NOT EXISTS idx_usage_counters_period ON usage_counters(user_id, 
 
 -- ============================================================================
 -- SEED: Default admin user (password: parakram-admin)
--- Hash generated with argon2id
 -- ============================================================================
 
 INSERT INTO user_profiles (user_id, username, email, password_hash, role)
@@ -155,6 +161,10 @@ VALUES (
     'admin'
 ) ON CONFLICT (user_id) DO NOTHING;
 
-INSERT INTO subscriptions (user_id, plan_tier, status, payment_verified)
-VALUES ('admin-001', 'maker', 'active', true)
-ON CONFLICT (user_id) DO NOTHING;
+-- Seed admin subscription (only columns guaranteed to exist)
+INSERT INTO subscriptions (user_id, plan_tier, status)
+VALUES ('admin-001', 'maker', 'active')
+ON CONFLICT (user_id) DO UPDATE SET plan_tier = 'maker', status = 'active';
+
+-- Set payment_verified separately (safe if column was just added)
+UPDATE subscriptions SET payment_verified = true WHERE user_id = 'admin-001';
