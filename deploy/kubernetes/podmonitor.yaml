@@ -1,0 +1,15 @@
+# PodMonitor for Prometheus Operator. Skip if not using kube-prometheus-stack.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: parakram-backend
+  namespace: parakram
+spec:
+  selector:
+    matchLabels:
+      app: parakram
+      component: backend
+  podMetricsEndpoints:
+    - port: http
+      path: /api/system/metrics
+      interval: 30s

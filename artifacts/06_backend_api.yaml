@@ -1,0 +1,1406 @@
+openapi: "3.1.0"
+info:
+  title: Parakram Backend API
+  description: |
+    Local backend API for the Parakram zero-code hardware programming platform.
+    Runs on the user's laptop — no cloud dependency. Handles IR validation,
+    bytecode compilation, LLM-assisted generation, device management, and telemetry.
+  version: "1.0.0"
+  contact:
+    name: Vidyuthlabs
+    url: https://vidyuthlabs.com
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost:8400
+    description: Local development backend
+
+tags:
+  - name: Projects
+    description: CRUD operations for hardware projects
+  - name: IR
+    description: Intermediate Representation validation and compilation
+  - name: LLM
+    description: Natural language to IR generation
+  - name: Devices
+    description: Device discovery, pairing, and management
+  - name: Telemetry
+    description: Real-time device telemetry
+  - name: Auth
+    description: Authentication and session management
+  - name: Drivers
+    description: Driver registry queries
+  - name: System
+    description: System health and configuration
+
+security:
+  - BearerAuth: []
+
+paths:
+  # ============================================================
+  # Auth
+  # ============================================================
+  /api/auth/login:
+    post:
+      tags: [Auth]
+      operationId: login
+      summary: Authenticate and obtain a JWT session token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Authentication successful
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/auth/refresh:
+    post:
+      tags: [Auth]
+      operationId: refreshToken
+      summary: Refresh an expiring JWT token
+      responses:
+        "200":
+          description: Token refreshed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  # ============================================================
+  # Projects
+  # ============================================================
+  /api/projects:
+    get:
+      tags: [Projects]
+      operationId: listProjects
+      summary: List all projects for the authenticated user
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+            minimum: 1
+            maximum: 200
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+            minimum: 0
+        - name: device_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+          description: Filter projects by device
+      responses:
+        "200":
+          description: Project list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+    post:
+      tags: [Projects]
+      operationId: createProject
+      summary: Create a new project
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateProjectRequest"
+      responses:
+        "201":
+          description: Project created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Project"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/projects/{project_id}:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+    get:
+      tags: [Projects]
+      operationId: getProject
+      summary: Get project details including current IR
+      responses:
+        "200":
+          description: Project details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Project"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      tags: [Projects]
+      operationId: updateProject
+      summary: Update a project
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateProjectRequest"
+      responses:
+        "200":
+          description: Project updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Project"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [Projects]
+      operationId: deleteProject
+      summary: Delete a project
+      responses:
+        "204":
+          description: Project deleted
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ============================================================
+  # IR (Intermediate Representation)
+  # ============================================================
+  /api/ir/validate:
+    post:
+      tags: [IR]
+      operationId: validateIR
+      summary: Validate an IR JSON document through the 8-step pipeline
+      description: |
+        Runs the full validation pipeline:
+        1. JSON Schema validation
+        2. Device reference resolution
+        3. State reference resolution
+        4. DAG cycle detection (Kahn's algorithm)
+        5. Resource conflict detection
+        6. Timing bound verification
+        7. Driver compatibility check
+        8. Safety policy check
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IRDocument"
+      responses:
+        "200":
+          description: Validation result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /api/ir/compile:
+    post:
+      tags: [IR]
+      operationId: compileIR
+      summary: Compile validated IR to signed bytecode
+      description: |
+        Validates the IR, compiles to bytecode, signs with Ed25519.
+        Returns the binary payload ready for device deployment.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ir, device_id]
+              properties:
+                ir:
+                  $ref: "#/components/schemas/IRDocument"
+                device_id:
+                  type: string
+                  format: uuid
+                  description: Target device UUID for signature binding
+      responses:
+        "200":
+          description: Compilation successful
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompileResult"
+        "400":
+          description: Validation failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationResult"
+        "422":
+          description: Compilation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/ir/deploy/{device_id}:
+    parameters:
+      - $ref: "#/components/parameters/DeviceId"
+    post:
+      tags: [IR]
+      operationId: deployToDevice
+      summary: Deploy signed bytecode to a device
+      description: |
+        Pushes the signed bytecode payload to the device via WiFi (preferred)
+        or returns the payload for BLE transfer by the app.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [bytecode_b64, project_id]
+              properties:
+                bytecode_b64:
+                  type: string
+                  format: byte
+                  description: Base64-encoded signed bytecode payload
+                project_id:
+                  type: string
+                  format: uuid
+                transfer_method:
+                  type: string
+                  enum: [wifi, ble]
+                  default: wifi
+                  description: Preferred transfer method
+      responses:
+        "200":
+          description: Deployment initiated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeployResult"
+        "404":
+          description: Device not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Device busy (another deployment in progress)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: Device unreachable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  # ============================================================
+  # LLM Integration
+  # ============================================================
+  /api/llm/intent:
+    post:
+      tags: [LLM]
+      operationId: processIntent
+      summary: Convert natural language description to IR JSON
+      description: |
+        Two-call pattern:
+        1. Feasibility check (is this possible with the connected hardware?)
+        2. If feasible, IR generation + validation
+        Rate limited to 10 calls per user per minute.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IntentRequest"
+      responses:
+        "200":
+          description: IR generated successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IntentResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "422":
+          description: Not feasible or generation failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IntentErrorResponse"
+        "429":
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/llm/templates:
+    get:
+      tags: [LLM]
+      operationId: listTemplates
+      summary: List available behavior templates
+      parameters:
+        - name: category
+          in: query
+          schema:
+            type: string
+            enum: [environment, motion, data_logging, automation, safety, agriculture, display]
+        - name: board_id
+          in: query
+          schema:
+            type: string
+          description: Filter compatible templates by board SKU
+      responses:
+        "200":
+          description: Template list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TemplateListResponse"
+
+  /api/llm/templates/{template_id}:
+    get:
+      tags: [LLM]
+      operationId: getTemplate
+      summary: Get a specific template with pre-built IR
+      parameters:
+        - name: template_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Template details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Template"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ============================================================
+  # Devices
+  # ============================================================
+  /api/devices:
+    get:
+      tags: [Devices]
+      operationId: listDevices
+      summary: List all paired devices with status
+      responses:
+        "200":
+          description: Device list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceListResponse"
+
+  /api/devices/{device_id}:
+    parameters:
+      - $ref: "#/components/parameters/DeviceId"
+    get:
+      tags: [Devices]
+      operationId: getDevice
+      summary: Get device details
+      responses:
+        "200":
+          description: Device details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Device"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      tags: [Devices]
+      operationId: updateDevice
+      summary: Update device settings (name, etc.)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  maxLength: 64
+      responses:
+        "200":
+          description: Device updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Device"
+    delete:
+      tags: [Devices]
+      operationId: unpairDevice
+      summary: Unpair a device
+      responses:
+        "204":
+          description: Device unpaired
+
+  /api/devices/pair:
+    post:
+      tags: [Devices]
+      operationId: pairDevice
+      summary: Register a new device pairing
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PairDeviceRequest"
+      responses:
+        "201":
+          description: Device paired
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Device"
+        "409":
+          description: Device already paired
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  # ============================================================
+  # Telemetry
+  # ============================================================
+  /api/devices/{device_id}/telemetry:
+    parameters:
+      - $ref: "#/components/parameters/DeviceId"
+    get:
+      tags: [Telemetry]
+      operationId: getTelemetryStream
+      summary: WebSocket stream of real-time telemetry
+      description: |
+        Upgrades to WebSocket. Streams JSON frames with pipeline execution
+        results and sensor readings. Client can send control messages to
+        filter pipelines or adjust update rate.
+      responses:
+        "101":
+          description: Switching Protocols (WebSocket upgrade)
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/devices/{device_id}/telemetry/history:
+    parameters:
+      - $ref: "#/components/parameters/DeviceId"
+    get:
+      tags: [Telemetry]
+      operationId: getTelemetryHistory
+      summary: Query historical telemetry data
+      parameters:
+        - name: pipeline_id
+          in: query
+          schema:
+            type: string
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+            maximum: 1000
+      responses:
+        "200":
+          description: Telemetry history
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TelemetryHistoryResponse"
+
+  # ============================================================
+  # Driver Registry
+  # ============================================================
+  /api/drivers:
+    get:
+      tags: [Drivers]
+      operationId: listDrivers
+      summary: List all registered drivers
+      parameters:
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [sensor, actuator, display, combo]
+        - name: bus
+          in: query
+          schema:
+            type: string
+            enum: [i2c, spi, uart, onewire, adc, gpio, pwm, rmt]
+        - name: capability
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Driver list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DriverListResponse"
+
+  /api/drivers/{driver_name}:
+    get:
+      tags: [Drivers]
+      operationId: getDriver
+      summary: Get full driver specification
+      parameters:
+        - name: driver_name
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^drv_[a-z][a-z0-9_]+$"
+      responses:
+        "200":
+          description: Driver specification
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DriverSpec"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ============================================================
+  # Board Registry
+  # ============================================================
+  /api/boards:
+    get:
+      tags: [Drivers]
+      operationId: listBoards
+      summary: List all supported board SKUs
+      responses:
+        "200":
+          description: Board list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  boards:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/BoardDescriptor"
+
+  /api/boards/{board_id}:
+    get:
+      tags: [Drivers]
+      operationId: getBoard
+      summary: Get board descriptor with pin map and default devices
+      parameters:
+        - name: board_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Board descriptor
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BoardDescriptor"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ============================================================
+  # System
+  # ============================================================
+  /api/system/health:
+    get:
+      tags: [System]
+      operationId: healthCheck
+      summary: System health check
+      security: []
+      responses:
+        "200":
+          description: System healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+
+  /api/system/config:
+    get:
+      tags: [System]
+      operationId: getSystemConfig
+      summary: Get system configuration
+      responses:
+        "200":
+          description: System configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SystemConfig"
+
+components:
+  # ============================================================
+  # Security Schemes
+  # ============================================================
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT token obtained from /api/auth/login (24h expiry)
+
+  # ============================================================
+  # Parameters
+  # ============================================================
+  parameters:
+    ProjectId:
+      name: project_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    DeviceId:
+      name: device_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  # ============================================================
+  # Common Responses
+  # ============================================================
+  responses:
+    BadRequest:
+      description: Invalid request
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Unauthorized:
+      description: Authentication required or token expired
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+  # ============================================================
+  # Schemas
+  # ============================================================
+  schemas:
+    # --- Auth ---
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username:
+          type: string
+          minLength: 1
+          maxLength: 64
+        password:
+          type: string
+          minLength: 8
+          maxLength: 128
+
+    LoginResponse:
+      type: object
+      properties:
+        token:
+          type: string
+          description: JWT access token
+        expires_at:
+          type: string
+          format: date-time
+        user_id:
+          type: string
+          format: uuid
+
+    # --- Project ---
+    CreateProjectRequest:
+      type: object
+      required: [name, device_id]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 128
+        description:
+          type: string
+          maxLength: 512
+        device_id:
+          type: string
+          format: uuid
+        ir:
+          $ref: "#/components/schemas/IRDocument"
+
+    UpdateProjectRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          maxLength: 128
+        description:
+          type: string
+          maxLength: 512
+        ir:
+          $ref: "#/components/schemas/IRDocument"
+
+    Project:
+      type: object
+      properties:
+        project_id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+        device_id:
+          type: string
+          format: uuid
+        ir:
+          $ref: "#/components/schemas/IRDocument"
+        bytecode_hash:
+          type: string
+          description: SHA-256 hash of last compiled bytecode
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        deployed_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    ProjectListResponse:
+      type: object
+      properties:
+        projects:
+          type: array
+          items:
+            $ref: "#/components/schemas/Project"
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+
+    # --- IR ---
+    IRDocument:
+      type: object
+      description: Full IR JSON document (see Artifact 3 for complete schema)
+      additionalProperties: true
+
+    ValidationResult:
+      type: object
+      properties:
+        valid:
+          type: boolean
+        errors:
+          type: array
+          items:
+            $ref: "#/components/schemas/ValidationError"
+        warnings:
+          type: array
+          items:
+            $ref: "#/components/schemas/ValidationWarning"
+        steps_completed:
+          type: integer
+          minimum: 0
+          maximum: 8
+          description: Number of validation steps passed before failure (0-8)
+
+    ValidationError:
+      type: object
+      properties:
+        step:
+          type: integer
+          minimum: 1
+          maximum: 8
+          description: |
+            Validation step number:
+            1=JSON Schema, 2=Device refs, 3=State refs,
+            4=DAG cycle, 5=Resource conflict, 6=Timing bounds,
+            7=Driver compat, 8=Safety policy
+        step_name:
+          type: string
+        field_path:
+          type: string
+          description: JSON path to the problematic field
+        code:
+          type: string
+          enum:
+            - SCHEMA_INVALID
+            - DEVICE_NOT_FOUND
+            - DRIVER_NOT_FOUND
+            - STATE_VAR_NOT_FOUND
+            - STATE_VAR_DANGLING_REF
+            - DAG_CYCLE_DETECTED
+            - RESOURCE_CONFLICT
+            - MUTEX_GROUP_MISSING
+            - TIMING_VIOLATION
+            - EXECUTION_EXCEEDS_INTERVAL
+            - DRIVER_CAPABILITY_MISMATCH
+            - DRIVER_BUS_MISMATCH
+            - RATE_LIMIT_EXCEEDED
+            - STACK_OVERFLOW_RISK
+            - NODE_LIMIT_EXCEEDED
+            - STATE_VAR_LIMIT_EXCEEDED
+            - PIPELINE_LIMIT_EXCEEDED
+            - STRING_TOO_LONG
+            - FORWARD_REF_VIOLATION
+        message:
+          type: string
+          description: Human-readable error description
+
+    ValidationWarning:
+      type: object
+      properties:
+        step:
+          type: integer
+        field_path:
+          type: string
+        code:
+          type: string
+        message:
+          type: string
+
+    CompileResult:
+      type: object
+      properties:
+        bytecode_b64:
+          type: string
+          format: byte
+          description: Base64-encoded signed bytecode payload
+        bytecode_size:
+          type: integer
+          description: Payload size in bytes
+        bytecode_hash:
+          type: string
+          description: SHA-256 hash of the bytecode
+        num_instructions:
+          type: integer
+        num_constants:
+          type: integer
+        num_pipelines:
+          type: integer
+        ir_summary:
+          type: object
+          properties:
+            devices:
+              type: integer
+            state_variables:
+              type: integer
+            triggers:
+              type: integer
+            total_nodes:
+              type: integer
+
+    DeployResult:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [deployed, pending_ble, failed]
+        device_id:
+          type: string
+          format: uuid
+        program_id:
+          type: string
+          format: uuid
+        transfer_method:
+          type: string
+          enum: [wifi, ble]
+        message:
+          type: string
+
+    # --- LLM ---
+    IntentRequest:
+      type: object
+      required: [description, board_id]
+      properties:
+        description:
+          type: string
+          maxLength: 2000
+          description: Natural language description of desired behavior
+        board_id:
+          type: string
+          description: Board SKU for the target device
+        device_id:
+          type: string
+          format: uuid
+          description: Optional specific device (for device-aware generation)
+        context:
+          type: string
+          maxLength: 500
+          description: Optional additional context or constraints
+
+    IntentResponse:
+      type: object
+      properties:
+        feasible:
+          type: boolean
+        ir:
+          $ref: "#/components/schemas/IRDocument"
+        ir_preview:
+          $ref: "#/components/schemas/IRPreview"
+        validation:
+          $ref: "#/components/schemas/ValidationResult"
+        llm_model:
+          type: string
+          description: Model used for generation
+        generation_time_ms:
+          type: integer
+          description: Time taken for LLM generation
+
+    IntentErrorResponse:
+      type: object
+      properties:
+        feasible:
+          type: boolean
+        reason:
+          type: string
+          description: Human-readable reason why it's not feasible
+        clarifications:
+          type: array
+          items:
+            type: string
+          description: Questions to ask the user for clarification
+        suggestions:
+          type: array
+          items:
+            type: string
+          description: Alternative approaches that are feasible
+
+    IRPreview:
+      type: object
+      description: Plain-English preview of the IR for user confirmation
+      properties:
+        summary:
+          type: string
+          description: One-sentence summary
+        triggers:
+          type: array
+          items:
+            type: object
+            properties:
+              description:
+                type: string
+              interval:
+                type: string
+        actions:
+          type: array
+          items:
+            type: object
+            properties:
+              condition:
+                type: string
+              action:
+                type: string
+        sensors_used:
+          type: array
+          items:
+            type: string
+        actuators_used:
+          type: array
+          items:
+            type: string
+
+    # --- Templates ---
+    Template:
+      type: object
+      properties:
+        template_id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        category:
+          type: string
+          enum: [environment, motion, data_logging, automation, safety, agriculture, display]
+        difficulty:
+          type: string
+          enum: [beginner, intermediate, advanced]
+        required_sensors:
+          type: array
+          items:
+            type: string
+        required_actuators:
+          type: array
+          items:
+            type: string
+        ir:
+          $ref: "#/components/schemas/IRDocument"
+        preview_image:
+          type: string
+          format: uri
+
+    TemplateListResponse:
+      type: object
+      properties:
+        templates:
+          type: array
+          items:
+            $ref: "#/components/schemas/Template"
+        total:
+          type: integer
+
+    # --- Devices ---
+    Device:
+      type: object
+      properties:
+        device_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        board_sku:
+          type: string
+        firmware_version:
+          type: string
+        status:
+          type: string
+          enum: [online, offline, deploying, error]
+        connectivity:
+          type: string
+          enum: [wifi, ble, both, none]
+        ip_address:
+          type: string
+          format: ipv4
+          nullable: true
+        ble_address:
+          type: string
+          nullable: true
+        uptime_seconds:
+          type: integer
+          nullable: true
+        active_program_id:
+          type: string
+          format: uuid
+          nullable: true
+        active_pipelines:
+          type: integer
+          nullable: true
+        error_count:
+          type: integer
+        paired_at:
+          type: string
+          format: date-time
+        last_seen_at:
+          type: string
+          format: date-time
+
+    DeviceListResponse:
+      type: object
+      properties:
+        devices:
+          type: array
+          items:
+            $ref: "#/components/schemas/Device"
+
+    PairDeviceRequest:
+      type: object
+      required: [device_uuid, board_sku, device_pubkey]
+      properties:
+        device_uuid:
+          type: string
+          format: uuid
+        board_sku:
+          type: string
+        device_pubkey:
+          type: string
+          format: byte
+          description: Base64-encoded device public key
+        name:
+          type: string
+          maxLength: 64
+          default: "My Parakram Device"
+
+    # --- Telemetry ---
+    TelemetryFrame:
+      type: object
+      description: Single telemetry data point (WebSocket frame)
+      properties:
+        device_id:
+          type: string
+          format: uuid
+        timestamp:
+          type: string
+          format: date-time
+        pipeline_id:
+          type: string
+        tick:
+          type: integer
+        values:
+          type: object
+          additionalProperties:
+            oneOf:
+              - type: number
+              - type: boolean
+              - type: string
+
+    TelemetryHistoryResponse:
+      type: object
+      properties:
+        device_id:
+          type: string
+          format: uuid
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/TelemetryFrame"
+        total:
+          type: integer
+
+    # --- Drivers ---
+    DriverSpec:
+      type: object
+      properties:
+        name:
+          type: string
+        display_name:
+          type: string
+        version:
+          type: string
+        type:
+          type: string
+          enum: [sensor, actuator, display, combo]
+        bus_type:
+          type: string
+          enum: [i2c, spi, uart, onewire, adc, gpio, pwm, rmt]
+        capabilities:
+          type: array
+          items:
+            type: string
+        max_latency_us:
+          type: integer
+        min_interval_ms:
+          type: integer
+        i2c_addresses:
+          type: array
+          items:
+            type: string
+          nullable: true
+        config_options:
+          type: object
+          additionalProperties: true
+        failure_modes:
+          type: array
+          items:
+            type: object
+            properties:
+              error:
+                type: string
+              description:
+                type: string
+              safe_fallback:
+                type: string
+
+    DriverListResponse:
+      type: object
+      properties:
+        drivers:
+          type: array
+          items:
+            $ref: "#/components/schemas/DriverSpec"
+        total:
+          type: integer
+
+    # --- Board ---
+    BoardDescriptor:
+      type: object
+      properties:
+        sku:
+          type: string
+        name:
+          type: string
+        soc:
+          type: string
+        flash_mb:
+          type: integer
+        psram_mb:
+          type: integer
+        pin_map:
+          type: object
+          properties:
+            i2c:
+              type: array
+              items:
+                type: object
+                properties:
+                  index:
+                    type: integer
+                  sda_pin:
+                    type: integer
+                  scl_pin:
+                    type: integer
+                  freq_hz:
+                    type: integer
+            spi:
+              type: array
+              items:
+                type: object
+                properties:
+                  index:
+                    type: integer
+                  mosi_pin:
+                    type: integer
+                  miso_pin:
+                    type: integer
+                  sclk_pin:
+                    type: integer
+                  cs_pins:
+                    type: array
+                    items:
+                      type: integer
+            adc_channels:
+              type: array
+              items:
+                type: object
+                properties:
+                  slot:
+                    type: string
+                  pin:
+                    type: integer
+            pwm_channels:
+              type: array
+              items:
+                type: object
+                properties:
+                  slot:
+                    type: string
+                  pin:
+                    type: integer
+            gpio_outputs:
+              type: array
+              items:
+                type: object
+                properties:
+                  slot:
+                    type: string
+                  pin:
+                    type: integer
+            gpio_inputs:
+              type: array
+              items:
+                type: object
+                properties:
+                  slot:
+                    type: string
+                  pin:
+                    type: integer
+        default_devices:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+              driver:
+                type: string
+              bus:
+                type: string
+              slot:
+                type: string
+
+    # --- System ---
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [healthy, degraded, unhealthy]
+        version:
+          type: string
+        uptime_seconds:
+          type: integer
+        database:
+          type: string
+          enum: [connected, disconnected]
+        llm_available:
+          type: boolean
+        connected_devices:
+          type: integer
+
+    SystemConfig:
+      type: object
+      properties:
+        max_projects_per_user:
+          type: integer
+        max_devices_per_user:
+          type: integer
+        llm_model:
+          type: string
+        llm_rate_limit_per_minute:
+          type: integer
+        supported_boards:
+          type: array
+          items:
+            type: string
+        ir_schema_version:
+          type: string
+        bytecode_version:
+          type: integer
+
+    # --- Error ---
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+            details:
+              type: object
+              additionalProperties: true

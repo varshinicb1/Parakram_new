@@ -1,0 +1,104 @@
+# Production compose — Parakram (Vidyuthlabs)
+# Usage:
+#   docker compose -f docker-compose.prod.yml --env-file .env.production up -d
+#
+# Expects in .env.production:
+#   SUPABASE_DB_URL, SUPABASE_JWT_SECRET, SUPABASE_URL
+#   ANTHROPIC_API_KEY, ANTHROPIC_MODEL
+#   STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, STRIPE_PRICE_HOBBY, STRIPE_PRICE_PRO
+#   DOMAIN (e.g. api.parakram.com), CERTBOT_EMAIL
+
+name: parakram
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: parakram-backend:${PARAKRAM_VERSION:-latest}
+    restart: unless-stopped
+    env_file: .env.production
+    environment:
+      - RUST_LOG=parakram_backend=info,tower_http=info
+      - BIND_ADDR=0.0.0.0:8400
+    expose:
+      - "8400"
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 128M
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8400/api/system/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging: *default-logging
+    networks: [parakram_net]
+
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.prod.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/includes:/etc/nginx/includes:ro
+      - certbot_certs:/etc/letsencrypt:ro
+      - certbot_www:/var/www/certbot:ro
+    depends_on:
+      backend:
+        condition: service_healthy
+    logging: *default-logging
+    networks: [parakram_net]
+
+  certbot:
+    image: certbot/certbot:v2.11.0
+    restart: "no"
+    volumes:
+      - certbot_certs:/etc/letsencrypt
+      - certbot_www:/var/www/certbot
+    entrypoint: /bin/sh -c
+    command: >
+      "trap exit TERM;
+       while :; do
+         certbot renew --webroot -w /var/www/certbot --quiet;
+         sleep 12h & wait $${!};
+       done"
+    logging: *default-logging
+
+  prometheus:
+    image: prom/prometheus:v2.55.0
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=30d
+      - --web.enable-lifecycle
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    expose:
+      - "9090"
+    logging: *default-logging
+    networks: [parakram_net]
+
+volumes:
+  certbot_certs:
+  certbot_www:
+  prometheus_data:
+
+networks:
+  parakram_net:
+    driver: bridge

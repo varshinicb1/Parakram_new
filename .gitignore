@@ -1,0 +1,42 @@
+# Rust
+backend/target/
+
+# Android build artifacts
+android/.gradle/
+android/app/build/
+android/build/
+android/local.properties
+android/keystore.properties
+android/*.jks
+android/*.keystore
+
+# iOS build artifacts
+ios/build/
+ios/DerivedData/
+ios/*.xcworkspace/xcuserdata/
+ios/Pods/
+ios/.build/
+
+# Firmware build output
+firmware/build/
+
+# Secrets & env files
+.env
+backend/.env
+release_artifacts/.env
+**/.env.local
+
+# External tools (SDKs, toolchains — not source, too large for git)
+external_tools/
+
+# Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Logs
+*.log
+release_artifacts/server.log
+release_artifacts/dogfood.result

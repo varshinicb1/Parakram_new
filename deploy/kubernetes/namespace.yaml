@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: parakram
+  labels:
+    app: parakram
+    tier: production

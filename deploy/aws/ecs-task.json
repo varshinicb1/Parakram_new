@@ -1,0 +1,55 @@
+{
+  "family": "parakram-backend",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "512",
+  "memory": "1024",
+  "executionRoleArn": "arn:aws:iam::ACCOUNT_ID:role/ecsTaskExecutionRole",
+  "taskRoleArn": "arn:aws:iam::ACCOUNT_ID:role/parakramTaskRole",
+  "runtimePlatform": {
+    "operatingSystemFamily": "LINUX",
+    "cpuArchitecture": "ARM64"
+  },
+  "containerDefinitions": [
+    {
+      "name": "backend",
+      "image": "ghcr.io/vidyuthlabs/parakram-backend:latest",
+      "essential": true,
+      "portMappings": [
+        { "containerPort": 8400, "protocol": "tcp", "name": "http" }
+      ],
+      "environment": [
+        { "name": "BIND_ADDR", "value": "0.0.0.0:8400" },
+        { "name": "RUST_LOG",  "value": "parakram_backend=info,tower_http=info" }
+      ],
+      "secrets": [
+        { "name": "SUPABASE_DB_URL",       "valueFrom": "arn:aws:secretsmanager:REGION:ACCOUNT_ID:secret:parakram/supabase-db-url" },
+        { "name": "SUPABASE_JWT_SECRET",   "valueFrom": "arn:aws:secretsmanager:REGION:ACCOUNT_ID:secret:parakram/supabase-jwt" },
+        { "name": "ANTHROPIC_API_KEY",     "valueFrom": "arn:aws:secretsmanager:REGION:ACCOUNT_ID:secret:parakram/anthropic" },
+        { "name": "STRIPE_SECRET_KEY",     "valueFrom": "arn:aws:secretsmanager:REGION:ACCOUNT_ID:secret:parakram/stripe-secret" },
+        { "name": "STRIPE_WEBHOOK_SECRET", "valueFrom": "arn:aws:secretsmanager:REGION:ACCOUNT_ID:secret:parakram/stripe-webhook" }
+      ],
+      "healthCheck": {
+        "command": ["CMD-SHELL", "curl -f http://localhost:8400/api/system/health || exit 1"],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 10
+      },
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group":         "/ecs/parakram-backend",
+          "awslogs-region":        "ap-south-1",
+          "awslogs-stream-prefix": "backend",
+          "awslogs-create-group":  "true"
+        }
+      },
+      "ulimits": [
+        { "name": "nofile", "softLimit": 65535, "hardLimit": 65535 }
+      ],
+      "readonlyRootFilesystem": true,
+      "user": "1001:1001"
+    }
+  ]
+}

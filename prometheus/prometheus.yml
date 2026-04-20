@@ -1,0 +1,18 @@
+global:
+  scrape_interval:     15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: parakram-prod
+
+scrape_configs:
+  - job_name: parakram-backend
+    metrics_path: /api/system/metrics
+    static_configs:
+      - targets: ["backend:8400"]
+        labels:
+          service: parakram
+          env: production
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]

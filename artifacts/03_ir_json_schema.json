@@ -1,0 +1,762 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://parakram.vidyuthlabs.com/ir/v1/schema.json",
+  "title": "Parakram IR Schema",
+  "description": "Intermediate Representation for the Parakram zero-code hardware programming platform. Describes a complete program as a directed acyclic graph of nodes.",
+  "type": "object",
+  "required": ["version", "program_id", "board_id", "created_at", "signature", "devices", "state", "triggers", "pipelines", "constraints"],
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "type": "string",
+      "const": "1.0",
+      "description": "IR schema version. Must be '1.0'."
+    },
+    "program_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Unique identifier for this program instance."
+    },
+    "board_id": {
+      "type": "string",
+      "pattern": "^VDYT-[A-Z0-9]+-[A-Z0-9]+$",
+      "description": "Vidyuthlabs board SKU identifier (e.g., 'VDYT-S3-R1')."
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp of IR creation."
+    },
+    "signature": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9+/=]{88}$",
+      "description": "Ed25519 signature of the bytecode payload, base64-encoded (64 bytes → 88 chars)."
+    },
+    "devices": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 32,
+      "description": "Physical hardware devices available on this board.",
+      "items": {
+        "$ref": "#/definitions/device"
+      }
+    },
+    "state": {
+      "type": "object",
+      "maxProperties": 64,
+      "description": "Named typed variables used across pipelines. Max 64 variables.",
+      "additionalProperties": {
+        "$ref": "#/definitions/state_variable"
+      }
+    },
+    "triggers": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 32,
+      "description": "Events that activate pipelines.",
+      "items": {
+        "$ref": "#/definitions/trigger"
+      }
+    },
+    "pipelines": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 16,
+      "description": "Ordered node sequences forming the program logic. Each pipeline is a DAG.",
+      "items": {
+        "$ref": "#/definitions/pipeline"
+      }
+    },
+    "constraints": {
+      "$ref": "#/definitions/constraints",
+      "description": "Global timing, resource, and safety constraints."
+    }
+  },
+  "definitions": {
+    "device": {
+      "type": "object",
+      "required": ["id", "driver", "bus", "capabilities"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,30}[a-z0-9]$",
+          "maxLength": 32,
+          "description": "Logical device name used as reference throughout the IR."
+        },
+        "driver": {
+          "type": "string",
+          "pattern": "^drv_[a-z][a-z0-9_]+$",
+          "description": "Driver identifier from the Vidyuthlabs driver registry.",
+          "enum": [
+            "drv_dht22", "drv_bme280", "drv_bmp280", "drv_mpu6050", "drv_adxl345",
+            "drv_hcsr04", "drv_bh1750", "drv_mq2", "drv_ds18b20", "drv_ina219",
+            "drv_max30102", "drv_tsl2561", "drv_si7021", "drv_veml7700", "drv_sht31",
+            "drv_ccs811", "drv_vl53l0x", "drv_mlx90614", "drv_apds9960", "drv_ens160",
+            "drv_hts221", "drv_lps22hb", "drv_lis3dh", "drv_max6675", "drv_hx711",
+            "drv_pir", "drv_reed", "drv_soil_cap", "drv_rain", "drv_tds", "drv_ph",
+            "drv_relay", "drv_servo", "drv_ws2812", "drv_buzzer", "drv_motor_dc",
+            "drv_motor_stepper", "drv_lcd_i2c", "drv_oled_ssd1306", "drv_solenoid",
+            "drv_fan_pwm"
+          ]
+        },
+        "bus": {
+          "type": "string",
+          "enum": ["i2c_0", "i2c_1", "spi_2", "uart_1", "onewire_0", "adc", "gpio", "rmt"],
+          "description": "Hardware bus this device is connected to. Resolved by the backend from the board descriptor."
+        },
+        "address": {
+          "type": "string",
+          "pattern": "^0x[0-9A-Fa-f]{2}$",
+          "description": "I2C address or SPI CS index. Required for I2C/SPI devices."
+        },
+        "pin_slot": {
+          "type": "string",
+          "pattern": "^(adc_ch[0-3]|pwm_ch[0-3]|gpio_out[0-3]|gpio_in[0-3]|onewire|ws2812)$",
+          "description": "Pin slot assignment from the board pin map. Required for GPIO/ADC/PWM devices."
+        },
+        "capabilities": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "items": {
+            "type": "string",
+            "enum": [
+              "temperature", "humidity", "pressure", "altitude",
+              "acceleration_x", "acceleration_y", "acceleration_z",
+              "gyroscope_x", "gyroscope_y", "gyroscope_z",
+              "distance", "light_lux", "light_uv",
+              "gas_ppm", "smoke_ppm", "co2_ppm", "tvoc_ppb",
+              "voltage", "current", "power",
+              "heart_rate", "spo2",
+              "proximity", "gesture",
+              "color_r", "color_g", "color_b",
+              "weight", "soil_moisture", "rain_level",
+              "tds_ppm", "ph_level",
+              "motion", "door_state",
+              "on_off", "angle_degrees", "speed_percent",
+              "color_rgb", "tone_hz", "direction",
+              "text_display", "pixel_display",
+              "flow_control"
+            ]
+          },
+          "description": "List of capabilities this device provides. Must match the driver's declared capabilities."
+        },
+        "config": {
+          "type": "object",
+          "description": "Optional driver-specific configuration parameters.",
+          "additionalProperties": false,
+          "properties": {
+            "sample_rate_hz": {
+              "type": "number",
+              "minimum": 0.1,
+              "maximum": 1000,
+              "description": "Sensor sampling rate in Hz."
+            },
+            "resolution_bits": {
+              "type": "integer",
+              "minimum": 8,
+              "maximum": 24,
+              "description": "ADC or sensor resolution in bits."
+            },
+            "range_max": {
+              "type": "number",
+              "description": "Maximum measurement range."
+            },
+            "range_min": {
+              "type": "number",
+              "description": "Minimum measurement range."
+            },
+            "led_count": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 60,
+              "description": "Number of addressable LEDs (WS2812)."
+            },
+            "display_cols": {
+              "type": "integer",
+              "minimum": 8,
+              "maximum": 128,
+              "description": "Display columns (LCD/OLED)."
+            },
+            "display_rows": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 64,
+              "description": "Display rows (LCD/OLED)."
+            },
+            "invert": {
+              "type": "boolean",
+              "description": "Invert output logic (e.g., active-low relay)."
+            },
+            "min_angle": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 360,
+              "description": "Minimum servo angle in degrees."
+            },
+            "max_angle": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 360,
+              "description": "Maximum servo angle in degrees."
+            }
+          }
+        }
+      }
+    },
+    "state_variable": {
+      "type": "object",
+      "required": ["type", "initial"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["int", "float", "bool", "string"],
+          "description": "Variable type. Strings are limited to 32 bytes."
+        },
+        "initial": {
+          "description": "Initial value. Must match the declared type.",
+          "oneOf": [
+            { "type": "integer" },
+            { "type": "number" },
+            { "type": "boolean" },
+            { "type": "string", "maxLength": 32 }
+          ]
+        },
+        "min": {
+          "type": "number",
+          "description": "Optional minimum bound for numeric types."
+        },
+        "max": {
+          "type": "number",
+          "description": "Optional maximum bound for numeric types."
+        },
+        "persistent": {
+          "type": "boolean",
+          "default": false,
+          "description": "If true, value is persisted to NVS across reboots."
+        }
+      }
+    },
+    "trigger": {
+      "type": "object",
+      "required": ["id", "type"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,30}[a-z0-9]$",
+          "maxLength": 32,
+          "description": "Unique trigger identifier."
+        },
+        "type": {
+          "type": "string",
+          "enum": ["timer", "sensor_threshold", "gpio_edge", "mqtt_message", "ble_event", "time_window", "startup"],
+          "description": "Trigger type."
+        },
+        "interval_ms": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 86400000,
+          "description": "Timer interval in milliseconds. Required when type is 'timer'. Minimum 100ms."
+        },
+        "cron": {
+          "type": "string",
+          "pattern": "^(\\*|[0-9,\\-\\/]+) (\\*|[0-9,\\-\\/]+) (\\*|[0-9,\\-\\/]+) (\\*|[0-9,\\-\\/]+) (\\*|[0-9,\\-\\/]+)$",
+          "description": "Cron expression (5-field). Alternative to interval_ms for timer triggers."
+        },
+        "device": {
+          "type": "string",
+          "description": "Device ID for sensor_threshold or gpio_edge triggers."
+        },
+        "field": {
+          "type": "string",
+          "description": "Capability field for sensor_threshold triggers."
+        },
+        "threshold": {
+          "type": "number",
+          "description": "Threshold value for sensor_threshold triggers."
+        },
+        "comparison": {
+          "type": "string",
+          "enum": ["gt", "lt", "gte", "lte", "eq", "neq"],
+          "description": "Comparison operator for sensor_threshold triggers."
+        },
+        "hysteresis": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Hysteresis value to prevent oscillation. Required for sensor_threshold triggers."
+        },
+        "edge": {
+          "type": "string",
+          "enum": ["rising", "falling", "both"],
+          "description": "Edge type for gpio_edge triggers."
+        },
+        "topic": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "MQTT topic for mqtt_message triggers."
+        },
+        "payload_match": {
+          "type": "string",
+          "maxLength": 32,
+          "description": "Optional payload substring match for mqtt_message triggers."
+        },
+        "ble_event_type": {
+          "type": "string",
+          "enum": ["connect", "disconnect", "characteristic_write"],
+          "description": "BLE event type for ble_event triggers."
+        },
+        "window_start": {
+          "type": "string",
+          "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+          "description": "Time window start (HH:MM, 24h format) for time_window triggers."
+        },
+        "window_end": {
+          "type": "string",
+          "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+          "description": "Time window end (HH:MM, 24h format) for time_window triggers."
+        },
+        "debounce_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 5000,
+          "default": 50,
+          "description": "Debounce time in milliseconds for edge-based triggers."
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "timer" } } },
+          "then": {
+            "anyOf": [
+              { "required": ["interval_ms"] },
+              { "required": ["cron"] }
+            ]
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "sensor_threshold" } } },
+          "then": { "required": ["device", "field", "threshold", "comparison", "hysteresis"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "gpio_edge" } } },
+          "then": { "required": ["device", "edge"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "mqtt_message" } } },
+          "then": { "required": ["topic"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "ble_event" } } },
+          "then": { "required": ["ble_event_type"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "time_window" } } },
+          "then": { "required": ["window_start", "window_end"] }
+        }
+      ]
+    },
+    "pipeline": {
+      "type": "object",
+      "required": ["id", "trigger", "nodes", "max_execution_ms"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,30}[a-z0-9]$",
+          "maxLength": 32,
+          "description": "Unique pipeline identifier."
+        },
+        "trigger": {
+          "type": "string",
+          "description": "Reference to a trigger ID that activates this pipeline."
+        },
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether this pipeline is active."
+        },
+        "priority": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 15,
+          "default": 5,
+          "description": "Pipeline execution priority (0=lowest, 15=highest)."
+        },
+        "mutex_group": {
+          "type": "string",
+          "maxLength": 32,
+          "description": "Mutex group name. Pipelines in the same mutex group cannot execute concurrently."
+        },
+        "nodes": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "description": "Ordered sequence of execution nodes. Must form a DAG (forward references only).",
+          "items": {
+            "$ref": "#/definitions/node"
+          }
+        },
+        "max_execution_ms": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5000,
+          "description": "Hard deadline in milliseconds. VM aborts pipeline if exceeded. Must be ≤ trigger interval."
+        }
+      }
+    },
+    "node": {
+      "type": "object",
+      "required": ["id", "type"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^n[0-9]{1,3}$",
+          "description": "Node identifier within the pipeline (e.g., 'n1', 'n2'). Used for jump targets."
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "sensor.read",
+            "actuator.write",
+            "actuator.write_pwm",
+            "condition.compare",
+            "condition.range",
+            "condition.and",
+            "condition.or",
+            "condition.not",
+            "math.add",
+            "math.sub",
+            "math.mul",
+            "math.div",
+            "math.abs",
+            "math.clamp",
+            "math.map",
+            "state.load",
+            "state.store",
+            "state.increment",
+            "mqtt.publish",
+            "ble.notify",
+            "storage.log",
+            "display.text",
+            "display.value",
+            "delay.ms",
+            "noop"
+          ],
+          "description": "Node operation type."
+        },
+        "device": {
+          "type": "string",
+          "description": "Device ID reference. Required for sensor.read and actuator.* nodes."
+        },
+        "field": {
+          "type": "string",
+          "description": "Capability field to read from a sensor."
+        },
+        "store_to": {
+          "type": "string",
+          "description": "State variable name to store the result into. Prefixed with $ when referenced."
+        },
+        "load_from": {
+          "type": "string",
+          "description": "State variable name to load a value from."
+        },
+        "value": {
+          "description": "Literal value for actuator writes, comparisons, etc.",
+          "oneOf": [
+            { "type": "integer" },
+            { "type": "number" },
+            { "type": "boolean" },
+            { "type": "string", "maxLength": 32 }
+          ]
+        },
+        "left": {
+          "description": "Left operand for comparisons and math. Can be a $variable reference or literal.",
+          "oneOf": [
+            { "type": "string" },
+            { "type": "number" }
+          ]
+        },
+        "right": {
+          "description": "Right operand for comparisons and math. Can be a $variable reference or literal.",
+          "oneOf": [
+            { "type": "string" },
+            { "type": "number" }
+          ]
+        },
+        "op": {
+          "type": "string",
+          "enum": ["eq", "neq", "gt", "lt", "gte", "lte"],
+          "description": "Comparison operator for condition nodes."
+        },
+        "if_true": {
+          "type": ["string", "null"],
+          "pattern": "^n[0-9]{1,3}$",
+          "description": "Node ID to jump to if condition is true. Must be forward reference only. Null = continue to next."
+        },
+        "if_false": {
+          "type": ["string", "null"],
+          "pattern": "^n[0-9]{1,3}$",
+          "description": "Node ID to jump to if condition is false. Must be forward reference only. Null = continue to next."
+        },
+        "operands": {
+          "type": "array",
+          "maxItems": 4,
+          "items": {
+            "oneOf": [
+              { "type": "string" },
+              { "type": "number" }
+            ]
+          },
+          "description": "Operand list for condition.and, condition.or nodes (references to $variables)."
+        },
+        "min_value": {
+          "type": "number",
+          "description": "Minimum bound for math.clamp and condition.range."
+        },
+        "max_value": {
+          "type": "number",
+          "description": "Maximum bound for math.clamp and condition.range."
+        },
+        "in_min": {
+          "type": "number",
+          "description": "Input range minimum for math.map."
+        },
+        "in_max": {
+          "type": "number",
+          "description": "Input range maximum for math.map."
+        },
+        "out_min": {
+          "type": "number",
+          "description": "Output range minimum for math.map."
+        },
+        "out_max": {
+          "type": "number",
+          "description": "Output range maximum for math.map."
+        },
+        "topic": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "MQTT topic for mqtt.publish."
+        },
+        "payload": {
+          "type": "string",
+          "maxLength": 128,
+          "description": "MQTT payload template. Use $variable for substitution."
+        },
+        "characteristic": {
+          "type": "string",
+          "description": "BLE characteristic name for ble.notify."
+        },
+        "fields": {
+          "type": "array",
+          "maxItems": 16,
+          "items": { "type": "string" },
+          "description": "State variable names to log for storage.log."
+        },
+        "destination": {
+          "type": "string",
+          "enum": ["sd_card", "flash", "mqtt"],
+          "description": "Log destination for storage.log."
+        },
+        "text": {
+          "type": "string",
+          "maxLength": 32,
+          "description": "Text content for display.text. Supports $variable substitution."
+        },
+        "line": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 7,
+          "description": "Display line number for display.text."
+        },
+        "duration_ms": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5000,
+          "description": "Delay duration for delay.ms nodes."
+        },
+        "duty_percent": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100,
+          "description": "PWM duty cycle percentage for actuator.write_pwm."
+        },
+        "color": {
+          "type": "object",
+          "properties": {
+            "r": { "type": "integer", "minimum": 0, "maximum": 255 },
+            "g": { "type": "integer", "minimum": 0, "maximum": 255 },
+            "b": { "type": "integer", "minimum": 0, "maximum": 255 }
+          },
+          "description": "RGB color for WS2812 LED strip."
+        },
+        "led_index": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 59,
+          "description": "LED index for WS2812 (0-based). Use -1 for all LEDs."
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "sensor.read" } } },
+          "then": { "required": ["device", "field", "store_to"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "actuator.write" } } },
+          "then": { "required": ["device", "value"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "actuator.write_pwm" } } },
+          "then": { "required": ["device", "duty_percent"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "condition.compare" } } },
+          "then": { "required": ["left", "op", "right"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "condition.range" } } },
+          "then": { "required": ["left", "min_value", "max_value"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "math.add" } } },
+          "then": { "required": ["left", "right", "store_to"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "math.sub" } } },
+          "then": { "required": ["left", "right", "store_to"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "math.mul" } } },
+          "then": { "required": ["left", "right", "store_to"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "math.div" } } },
+          "then": { "required": ["left", "right", "store_to"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "math.clamp" } } },
+          "then": { "required": ["left", "min_value", "max_value", "store_to"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "math.map" } } },
+          "then": { "required": ["left", "in_min", "in_max", "out_min", "out_max", "store_to"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "state.load" } } },
+          "then": { "required": ["load_from"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "state.store" } } },
+          "then": { "required": ["store_to", "value"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "state.increment" } } },
+          "then": { "required": ["store_to"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "mqtt.publish" } } },
+          "then": { "required": ["topic", "payload"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "storage.log" } } },
+          "then": { "required": ["fields", "destination"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "display.text" } } },
+          "then": { "required": ["device", "text", "line"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "delay.ms" } } },
+          "then": { "required": ["duration_ms"] }
+        }
+      ]
+    },
+    "constraints": {
+      "type": "object",
+      "required": ["max_total_nodes", "max_state_variables", "max_pipelines"],
+      "additionalProperties": false,
+      "properties": {
+        "max_total_nodes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 256,
+          "description": "Maximum total nodes across all pipelines. Hard limit: 256."
+        },
+        "max_state_variables": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 64,
+          "description": "Maximum number of state variables. Hard limit: 64."
+        },
+        "max_pipelines": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16,
+          "description": "Maximum number of concurrent pipelines. Hard limit: 16."
+        },
+        "max_devices": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 32,
+          "default": 32,
+          "description": "Maximum number of devices. Hard limit: 32."
+        },
+        "global_mutex_groups": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "pipelines"],
+            "properties": {
+              "name": {
+                "type": "string",
+                "maxLength": 32
+              },
+              "pipelines": {
+                "type": "array",
+                "items": { "type": "string" },
+                "minItems": 2,
+                "description": "Pipeline IDs that share this mutex group."
+              }
+            }
+          },
+          "description": "Mutex groups preventing concurrent actuator writes from conflicting pipelines."
+        },
+        "resource_budgets": {
+          "type": "object",
+          "properties": {
+            "i2c_0_max_devices": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 16,
+              "default": 8
+            },
+            "i2c_1_max_devices": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 16,
+              "default": 8
+            },
+            "total_adc_channels": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4,
+              "default": 4
+            },
+            "total_pwm_channels": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4,
+              "default": 4
+            }
+          },
+          "description": "Resource budgets for hardware buses and peripherals."
+        }
+      }
+    }
+  }
+}

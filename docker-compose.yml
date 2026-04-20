@@ -1,0 +1,36 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: parakram_backend
+    restart: always
+    environment:
+      - RUST_LOG=info
+      - BIND_ADDR=0.0.0.0:8400
+      - DATABASE_URL=sqlite:parakram.db?mode=rwc
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - JWT_SECRET=${JWT_SECRET}
+    volumes:
+      - parakram_data:/app
+    ports:
+      - "8400:8400"
+
+  nginx:
+    image: nginx:alpine
+    container_name: parakram_nginx
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - cert_data:/etc/letsencrypt
+    depends_on:
+      - backend
+
+volumes:
+  parakram_data:
+  cert_data:

@@ -1,0 +1,37 @@
+name: Rust Backend CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build & Test Backend
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        components: clippy, rustfmt
+        
+    - name: Cache dependencies
+      uses: Swatinem/rust-cache@v2
+      with:
+        workspaces: "backend -> target"
+        
+    - name: Check Formatting
+      run: cd backend && cargo fmt -- --check
+      
+    - name: Run Clippy
+      run: cd backend && cargo clippy -- -D warnings
+      
+    - name: Run Tests
+      run: cd backend && cargo test --verbose

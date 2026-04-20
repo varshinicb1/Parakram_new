@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+    branches: [main, staging]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  backend:
+    name: Backend (Rust)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.80"
+          components: rustfmt, clippy
+
+      - name: Cache cargo registry + target
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "backend -> target"
+
+      - name: Format check
+        working-directory: backend
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        working-directory: backend
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Build
+        working-directory: backend
+        run: cargo build --release
+
+      - name: Test
+        working-directory: backend
+        run: cargo test --release
+
+  firmware-esp32s3:
+    name: Firmware (ESP32-S3)
+    runs-on: ubuntu-latest
+    container: espressif/idf:release-v5.1
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        shell: bash
+        run: |
+          . $IDF_PATH/export.sh
+          cd firmware
+          idf.py set-target esp32s3
+          idf.py build
+
+  ros2-msgs:
+    name: ROS 2 messages (humble)
+    runs-on: ubuntu-latest
+    container: ros:humble-ros-base
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build parakram_msgs
+        shell: bash
+        run: |
+          . /opt/ros/humble/setup.bash
+          cd ros2_ws
+          colcon build --packages-select parakram_msgs

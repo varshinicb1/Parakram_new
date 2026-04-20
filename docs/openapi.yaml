@@ -1,0 +1,3502 @@
+openapi: 3.1.0
+
+info:
+  title: Parakram API
+  version: 1.0.0
+  description: |
+    Parakram is Vidyuthlabs' zero-code embedded platform. Users describe IoT
+    behaviour in plain English; the backend converts that description into a
+    validated IR document, compiles it to signed bytecode, and deploys it to
+    ESP32-S3 (and other) targets over Wi-Fi, BLE, or WebSerial.
+
+    **Base path:** all endpoints live under `/api/`.
+
+    **Authentication:** most routes require a JWT Bearer token obtained from
+    `POST /api/auth/register` or `POST /api/auth/login`. Pass the token in the
+    `Authorization: Bearer <token>` header. The WebSocket endpoint accepts it
+    as a `?token=` query parameter instead.
+
+    **Rate limiting:** LLM intent calls are protected by a server-side
+    concurrent-request gate (max 10 simultaneous heavy requests). Billing
+    quotas are enforced per-user per billing period for intent, compile, and
+    deploy operations.
+  contact:
+    name: Vidyuthlabs Engineering
+    email: engineering@vidyuthlabs.com
+    url: https://vidyuthlabs.co.in
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost:8400/api
+    description: Local development server
+  - url: https://api.parakram.vidyuthlabs.co.in/api
+    description: Production server (placeholder — update before publishing)
+
+security:
+  - BearerAuth: []
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Tags
+# ─────────────────────────────────────────────────────────────────────────────
+tags:
+  - name: Auth
+    description: |
+      Register, log in, manage your account, and list users (admin). All
+      tokens are HS256 JWTs valid for 24 hours. Supabase ES256 tokens are
+      also accepted.
+  - name: Devices
+    description: Pair, inspect, update, and unpair physical IoT boards.
+  - name: Projects
+    description: |
+      Projects bind a named program (IR + bytecode) to a paired device.
+      Create a project, attach an IR document, compile and deploy.
+  - name: LLM
+    description: |
+      Natural-language intent processing. Send a plain-English description and
+      receive a validated IR document back within ~500 ms.
+  - name: IR
+    description: |
+      Validate or compile an IR document directly (without going through the
+      LLM) and deploy compiled bytecode to a device.
+  - name: OTA
+    description: |
+      Over-the-air firmware update delivery. Devices poll `/ota/check`, fetch
+      the manifest, then stream the binary from `/ota/chunk`.
+  - name: Fleet
+    description: Aggregate statistics and device-list views across all your paired boards.
+  - name: Telemetry
+    description: |
+      Real-time WebSocket stream of sensor readings and device vitals.
+      Pushes a telemetry frame every 2 seconds.
+  - name: Billing
+    description: |
+      Plan catalog, subscription status, usage counters, Stripe Checkout
+      sessions, Billing Portal sessions, and the Stripe webhook receiver.
+  - name: Marketplace
+    description: |
+      Community driver marketplace. Browse approved drivers, submit your own,
+      rate, install, and (for admins) approve or reject submissions.
+  - name: System
+    description: |
+      Health checks, readiness probes, Prometheus metrics, system config,
+      driver registry, and board registry. Most routes are unauthenticated.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Security schemes
+# ─────────────────────────────────────────────────────────────────────────────
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        HS256 JWT issued by `POST /auth/register` or `POST /auth/login`.
+        Supabase ES256 tokens are also accepted.
+        Token lifetime: 24 hours.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Reusable schemas
+# ─────────────────────────────────────────────────────────────────────────────
+  schemas:
+
+    # ── Errors ────────────────────────────────────────────────────────────────
+
+    ErrorDetail:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          description: Machine-readable error code.
+          example: INVALID_CREDENTIALS
+        message:
+          type: string
+          description: Human-readable error message.
+          example: Invalid credentials
+      description: Inner error object included in every error response.
+
+    ErrorBody:
+      type: object
+      required: [error]
+      properties:
+        error:
+          $ref: '#/components/schemas/ErrorDetail'
+      description: Top-level envelope for all API error responses.
+
+    MessageResponse:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+          example: If that username exists, a reset code has been sent
+
+    # ── Auth ──────────────────────────────────────────────────────────────────
+
+    RegisterRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username:
+          type: string
+          minLength: 3
+          maxLength: 32
+          pattern: '^[a-zA-Z0-9_]+$'
+          description: Alphanumeric + underscore, 3–32 characters.
+          example: ada_lovelace
+        email:
+          type: string
+          format: email
+          description: Optional email address (used for password reset).
+          example: ada@example.com
+        password:
+          type: string
+          minLength: 8
+          description: Minimum 8 characters.
+          example: s3cur3P@ssw0rd
+      description: Registration credentials.
+
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username:
+          type: string
+          example: ada_lovelace
+        password:
+          type: string
+          example: s3cur3P@ssw0rd
+      description: Login credentials.
+
+    AuthResponse:
+      type: object
+      required: [token, expires_at, user_id, username]
+      properties:
+        token:
+          type: string
+          description: JWT Bearer token — include in `Authorization: Bearer <token>`.
+          example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+        expires_at:
+          type: string
+          format: date-time
+          description: RFC 3339 timestamp when the token expires (24 h from issue).
+          example: '2026-04-21T12:00:00Z'
+        user_id:
+          type: string
+          format: uuid
+          example: 550e8400-e29b-41d4-a716-446655440000
+        username:
+          type: string
+          example: ada_lovelace
+      description: Successful authentication response.
+
+    MeResponse:
+      type: object
+      required: [user_id]
+      properties:
+        user_id:
+          type: string
+          format: uuid
+          example: 550e8400-e29b-41d4-a716-446655440000
+        email:
+          type: string
+          format: email
+          nullable: true
+          example: ada@example.com
+        role:
+          type: string
+          nullable: true
+          example: user
+      description: Authenticated user profile.
+
+    ForgotPasswordRequest:
+      type: object
+      required: [username]
+      properties:
+        username:
+          type: string
+          example: ada_lovelace
+
+    ResetPasswordRequest:
+      type: object
+      required: [username, code, new_password]
+      properties:
+        username:
+          type: string
+          example: ada_lovelace
+        code:
+          type: string
+          description: 6-digit reset code sent to the user's email.
+          example: '482391'
+        new_password:
+          type: string
+          minLength: 8
+          example: newS3cur3P@ss
+
+    # ── Devices ───────────────────────────────────────────────────────────────
+
+    PairDeviceRequest:
+      type: object
+      required: [device_uuid, board_sku, device_pubkey]
+      properties:
+        device_uuid:
+          type: string
+          format: uuid
+          description: UUID burned into the device firmware.
+          example: 7c9e6679-7425-40de-944b-e07fc1f90ae7
+        board_sku:
+          type: string
+          description: Board SKU from the `/boards` registry.
+          example: esp32s3-devkit-c1
+        device_pubkey:
+          type: string
+          description: Base64-encoded Ed25519 public key of the device.
+          example: MCowBQYDK2VdAyEA...
+        name:
+          type: string
+          default: My Parakram Device
+          example: Living Room Sensor
+      description: Request body for pairing a new device.
+
+    UpdateDeviceRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          example: Kitchen Actuator
+
+    DeviceResponse:
+      type: object
+      required: [device_id, name, board_sku, status, error_count, paired_at]
+      properties:
+        device_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          example: Living Room Sensor
+        board_sku:
+          type: string
+          example: esp32s3-devkit-c1
+        firmware_version:
+          type: string
+          nullable: true
+          example: '1.2.3'
+        status:
+          type: string
+          enum: [online, offline, deploying]
+          example: online
+        ip_address:
+          type: string
+          nullable: true
+          example: 192.168.1.42
+        ble_address:
+          type: string
+          nullable: true
+          example: 'AA:BB:CC:DD:EE:FF'
+        active_program_id:
+          type: string
+          format: uuid
+          nullable: true
+        error_count:
+          type: integer
+          example: 0
+        paired_at:
+          type: string
+          format: date-time
+        last_seen_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    DeviceListResponse:
+      type: object
+      required: [devices]
+      properties:
+        devices:
+          type: array
+          items:
+            $ref: '#/components/schemas/DeviceResponse'
+
+    # ── Projects ──────────────────────────────────────────────────────────────
+
+    CreateProjectRequest:
+      type: object
+      required: [name, device_id]
+      properties:
+        name:
+          type: string
+          example: Temperature Monitor
+        device_id:
+          type: string
+          format: uuid
+          example: 7c9e6679-7425-40de-944b-e07fc1f90ae7
+        description:
+          type: string
+          nullable: true
+          example: Reads DHT22 every 30 s and turns on fan above 28 °C
+        ir:
+          $ref: '#/components/schemas/IRDocument'
+          description: Optional IR document to attach immediately.
+
+    UpdateProjectRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          nullable: true
+        description:
+          type: string
+          nullable: true
+        ir:
+          $ref: '#/components/schemas/IRDocument'
+          nullable: true
+
+    ProjectResponse:
+      type: object
+      required: [project_id, user_id, device_id, name, created_at, updated_at]
+      properties:
+        project_id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        device_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          example: Temperature Monitor
+        description:
+          type: string
+          nullable: true
+        ir:
+          $ref: '#/components/schemas/IRDocument'
+          nullable: true
+        bytecode_hash:
+          type: string
+          nullable: true
+          description: SHA-256 hex digest of the last compiled bytecode.
+          example: 3b4c2d...
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        deployed_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    ProjectListResponse:
+      type: object
+      required: [projects, total, limit, offset]
+      properties:
+        projects:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProjectResponse'
+        total:
+          type: integer
+          example: 12
+        limit:
+          type: integer
+          example: 50
+        offset:
+          type: integer
+          example: 0
+
+    # ── IR document ───────────────────────────────────────────────────────────
+
+    IRDocument:
+      type: object
+      required: [version, program_id, board_id, created_at, devices, pipelines]
+      description: |
+        The Parakram Intermediate Representation (IR) document. This is the
+        contract between the LLM pipeline and the bytecode compiler. It
+        fully describes the hardware layout, event triggers, and execution
+        pipelines for a program.
+      properties:
+        version:
+          type: string
+          example: '1.0'
+        program_id:
+          type: string
+          description: Unique identifier for this program.
+          example: prog_abc123
+        board_id:
+          type: string
+          description: Board SKU this IR targets.
+          example: esp32s3-devkit-c1
+        created_at:
+          type: string
+          format: date-time
+        signature:
+          type: string
+          description: Ed25519 signature (set by compiler).
+          default: ''
+        devices:
+          type: array
+          items:
+            $ref: '#/components/schemas/IRDevice'
+        state:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/IRStateVariable'
+          description: Named state variables persisted across pipeline executions.
+        triggers:
+          type: array
+          items:
+            $ref: '#/components/schemas/IRTrigger'
+        pipelines:
+          type: array
+          items:
+            $ref: '#/components/schemas/IRPipeline'
+        constraints:
+          $ref: '#/components/schemas/IRConstraints'
+      example:
+        version: '1.0'
+        program_id: prog_abc123
+        board_id: esp32s3-devkit-c1
+        created_at: '2026-04-20T10:00:00Z'
+        signature: ''
+        devices:
+          - id: temp_sensor
+            driver: drv_dht22
+            bus: gpio
+            pin_slot: '4'
+            capabilities: [temperature, humidity]
+        state:
+          fan_on:
+            type: bool
+            initial: false
+        triggers:
+          - id: trig_timer
+            trigger_type: timer
+            interval_ms: 30000
+        pipelines:
+          - id: pipe_main
+            trigger: trig_timer
+            enabled: true
+            priority: 5
+            max_execution_ms: 500
+            nodes:
+              - id: node_read
+                node_type: sensor_read
+                device: temp_sensor
+                field: temperature
+                store_to: temp_val
+              - id: node_branch
+                node_type: branch
+                left: temp_val
+                op: gt
+                right: 28.0
+                if_true: node_fan_on
+                if_false: node_fan_off
+              - id: node_fan_on
+                node_type: actuator_write
+                device: relay_fan
+                value: true
+              - id: node_fan_off
+                node_type: actuator_write
+                device: relay_fan
+                value: false
+        constraints:
+          max_total_nodes: 256
+          max_state_variables: 64
+          max_pipelines: 16
+
+    IRDevice:
+      type: object
+      required: [id, driver, capabilities]
+      properties:
+        id:
+          type: string
+          description: Logical identifier referenced in pipelines.
+          example: temp_sensor
+        driver:
+          type: string
+          description: Driver name from the driver registry.
+          example: drv_dht22
+        bus:
+          type: string
+          example: gpio
+        address:
+          type: string
+          nullable: true
+          description: I2C address or similar (as string or hex).
+          example: '0x48'
+        pin_slot:
+          type: string
+          nullable: true
+          description: GPIO pin number or named slot.
+          example: '4'
+        capabilities:
+          type: array
+          items:
+            type: string
+          example: [temperature, humidity]
+        config:
+          type: object
+          nullable: true
+          additionalProperties: true
+          description: Driver-specific configuration key-value pairs.
+
+    IRStateVariable:
+      type: object
+      required: [type, initial]
+      properties:
+        type:
+          type: string
+          enum: [bool, int, float, string]
+          example: float
+        initial:
+          description: Initial value matching the declared type.
+          example: 0.0
+        min:
+          type: number
+          nullable: true
+        max:
+          type: number
+          nullable: true
+        persistent:
+          type: boolean
+          nullable: true
+          description: Survive device reboot if true.
+
+    IRTrigger:
+      type: object
+      required: [id, trigger_type]
+      properties:
+        id:
+          type: string
+          example: trig_timer
+        trigger_type:
+          type: string
+          enum: [timer, sensor_threshold, startup, cron, mqtt, ble_event, time_window]
+          example: timer
+        interval_ms:
+          type: integer
+          nullable: true
+          description: Period in milliseconds (timer triggers).
+          example: 30000
+        cron:
+          type: string
+          nullable: true
+          example: '0 * * * *'
+        device:
+          type: string
+          nullable: true
+          description: Device id (sensor_threshold triggers).
+        field:
+          type: string
+          nullable: true
+          example: temperature
+        threshold:
+          type: number
+          nullable: true
+          example: 28.0
+        comparison:
+          type: string
+          nullable: true
+          enum: [gt, lt, gte, lte, eq, neq]
+          example: gt
+        hysteresis:
+          type: number
+          nullable: true
+        edge:
+          type: string
+          nullable: true
+          enum: [rising, falling, both]
+        topic:
+          type: string
+          nullable: true
+        debounce_ms:
+          type: integer
+          nullable: true
+
+    IRPipeline:
+      type: object
+      required: [id, trigger, nodes, max_execution_ms]
+      properties:
+        id:
+          type: string
+          example: pipe_main
+        trigger:
+          type: string
+          description: ID of the trigger that activates this pipeline.
+          example: trig_timer
+        enabled:
+          type: boolean
+          default: true
+        priority:
+          type: integer
+          minimum: 0
+          maximum: 255
+          default: 5
+        mutex_group:
+          type: string
+          nullable: true
+        nodes:
+          type: array
+          items:
+            $ref: '#/components/schemas/IRNode'
+        max_execution_ms:
+          type: integer
+          description: Hard deadline in milliseconds.
+          example: 500
+
+    IRNode:
+      type: object
+      required: [node_type]
+      description: |
+        A single execution step. `node_type` determines which optional fields
+        are relevant. Common types: `sensor_read`, `actuator_write`, `branch`,
+        `set_variable`, `load_variable`, `math`, `map_range`, `clamp`,
+        `log`, `delay`.
+      properties:
+        id:
+          type: string
+          description: Auto-generated UUID if omitted.
+        node_type:
+          type: string
+          example: sensor_read
+        next:
+          description: ID of the next node (string) or conditional map.
+          nullable: true
+        device:
+          type: string
+          nullable: true
+        field:
+          type: string
+          nullable: true
+        variable:
+          type: string
+          nullable: true
+        store_to:
+          type: string
+          nullable: true
+        load_from:
+          type: string
+          nullable: true
+        value:
+          nullable: true
+          description: Literal value (any type).
+        left:
+          nullable: true
+        right:
+          nullable: true
+        op:
+          type: string
+          nullable: true
+          example: gt
+        if_true:
+          type: string
+          nullable: true
+        if_false:
+          type: string
+          nullable: true
+        duration_ms:
+          type: integer
+          nullable: true
+        duty_percent:
+          type: number
+          nullable: true
+        text:
+          type: string
+          nullable: true
+        line:
+          type: integer
+          nullable: true
+        color:
+          $ref: '#/components/schemas/RGBColor'
+          nullable: true
+        led_index:
+          type: integer
+          nullable: true
+
+    RGBColor:
+      type: object
+      required: [r, g, b]
+      properties:
+        r:
+          type: integer
+          minimum: 0
+          maximum: 255
+        g:
+          type: integer
+          minimum: 0
+          maximum: 255
+        b:
+          type: integer
+          minimum: 0
+          maximum: 255
+
+    IRConstraints:
+      type: object
+      properties:
+        max_total_nodes:
+          type: integer
+          default: 256
+        max_state_variables:
+          type: integer
+          default: 64
+        max_pipelines:
+          type: integer
+          default: 16
+        max_stack_depth:
+          type: integer
+          nullable: true
+        total_state_bytes:
+          type: integer
+          nullable: true
+        max_execution_ms:
+          type: integer
+          nullable: true
+        max_devices:
+          type: integer
+          nullable: true
+
+    # ── LLM ───────────────────────────────────────────────────────────────────
+
+    IntentRequest:
+      type: object
+      required: [description, board_id]
+      properties:
+        description:
+          type: string
+          description: Plain-English description of the desired IoT behaviour.
+          example: Read temperature every 30 seconds. If above 28°C, turn on the fan relay.
+        board_id:
+          type: string
+          description: Board SKU to target (sets available pins and devices).
+          example: esp32s3-devkit-c1
+        device_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Optional paired device UUID for context.
+        context:
+          type: string
+          nullable: true
+          description: Additional freeform context passed to the LLM.
+      example:
+        description: Read temperature every 30 seconds. If above 28°C, turn on the fan relay.
+        board_id: esp32s3-devkit-c1
+
+    IntentResponse:
+      type: object
+      required: [feasible, llm_model, generation_time_ms]
+      properties:
+        feasible:
+          type: boolean
+          description: Whether the LLM determined the request is implementable.
+        ir:
+          $ref: '#/components/schemas/IRDocument'
+          nullable: true
+          description: Generated IR document (present when feasible=true).
+        ir_preview:
+          $ref: '#/components/schemas/IRPreview'
+          nullable: true
+        validation:
+          $ref: '#/components/schemas/ValidationResult'
+          nullable: true
+        reason:
+          type: string
+          nullable: true
+          description: Explanation when feasible=false.
+        clarifications:
+          type: array
+          items:
+            type: string
+          nullable: true
+          description: Clarifying questions when the request is ambiguous.
+        suggestions:
+          type: array
+          items:
+            type: string
+          nullable: true
+          description: Suggested alternatives when the request is infeasible.
+        llm_model:
+          type: string
+          example: claude-sonnet-4-6
+        generation_time_ms:
+          type: integer
+          description: End-to-end LLM call time in milliseconds.
+          example: 487
+      example:
+        feasible: true
+        llm_model: claude-sonnet-4-6
+        generation_time_ms: 487
+        ir_preview:
+          summary: 1 pipeline(s) with 1 trigger(s), 1 sensor(s), 1 actuator(s)
+          triggers:
+            - description: Every 30 seconds
+              interval: 30000ms
+          actions: []
+          sensors_used: [temp_sensor (drv_dht22)]
+          actuators_used: [relay_fan (drv_relay)]
+
+    IRPreview:
+      type: object
+      required: [summary, triggers, actions, sensors_used, actuators_used]
+      properties:
+        summary:
+          type: string
+          example: 1 pipeline(s) with 1 trigger(s), 1 sensor(s), 1 actuator(s)
+        triggers:
+          type: array
+          items:
+            $ref: '#/components/schemas/TriggerPreview'
+        actions:
+          type: array
+          items:
+            $ref: '#/components/schemas/ActionPreview'
+        sensors_used:
+          type: array
+          items:
+            type: string
+        actuators_used:
+          type: array
+          items:
+            type: string
+
+    TriggerPreview:
+      type: object
+      required: [description, interval]
+      properties:
+        description:
+          type: string
+          example: Every 30 seconds
+        interval:
+          type: string
+          example: 30000ms
+
+    ActionPreview:
+      type: object
+      required: [condition, action]
+      properties:
+        condition:
+          type: string
+        action:
+          type: string
+
+    # ── IR compile / validate ─────────────────────────────────────────────────
+
+    ValidationResult:
+      type: object
+      required: [valid, errors, warnings, steps_completed]
+      properties:
+        valid:
+          type: boolean
+        errors:
+          type: array
+          items:
+            $ref: '#/components/schemas/ValidationError'
+        warnings:
+          type: array
+          items:
+            $ref: '#/components/schemas/ValidationWarning'
+        steps_completed:
+          type: integer
+          minimum: 0
+          maximum: 8
+          description: Number of 8-step validation passes completed before failure.
+
+    ValidationError:
+      type: object
+      required: [step, step_name, field_path, code, message]
+      properties:
+        step:
+          type: integer
+          example: 3
+        step_name:
+          type: string
+          example: driver_registry_check
+        field_path:
+          type: string
+          example: devices[0].driver
+        code:
+          type: string
+          example: UNKNOWN_DRIVER
+        message:
+          type: string
+          example: "Driver 'drv_unknown' is not in the registry"
+
+    ValidationWarning:
+      type: object
+      required: [step, field_path, code, message]
+      properties:
+        step:
+          type: integer
+        field_path:
+          type: string
+        code:
+          type: string
+        message:
+          type: string
+
+    CompileRequest:
+      type: object
+      required: [ir, device_id]
+      properties:
+        ir:
+          $ref: '#/components/schemas/IRDocument'
+        device_id:
+          type: string
+          format: uuid
+          description: Target device UUID (used to bind the bytecode).
+          example: 7c9e6679-7425-40de-944b-e07fc1f90ae7
+      example:
+        device_id: 7c9e6679-7425-40de-944b-e07fc1f90ae7
+        ir:
+          version: '1.0'
+          program_id: prog_abc123
+          board_id: esp32s3-devkit-c1
+          created_at: '2026-04-20T10:00:00Z'
+          signature: ''
+          devices: []
+          pipelines: []
+
+    CompileResult:
+      type: object
+      required: [bytecode_b64, bytecode_size, bytecode_hash, num_instructions,
+                 num_constants, num_pipelines, ir_summary]
+      properties:
+        bytecode_b64:
+          type: string
+          description: Base64-encoded signed bytecode payload.
+          example: AAABAAI...
+        bytecode_size:
+          type: integer
+          description: Size of the bytecode in bytes.
+          example: 248
+        bytecode_hash:
+          type: string
+          description: SHA-256 hex digest of the bytecode payload.
+          example: 3b4c2d...
+        num_instructions:
+          type: integer
+          example: 12
+        num_constants:
+          type: integer
+          example: 4
+        num_pipelines:
+          type: integer
+          example: 1
+        ir_summary:
+          $ref: '#/components/schemas/IRSummary'
+      example:
+        bytecode_b64: AAABAAI...
+        bytecode_size: 248
+        bytecode_hash: 3b4c2d...
+        num_instructions: 12
+        num_constants: 4
+        num_pipelines: 1
+        ir_summary:
+          devices: 2
+          state_variables: 1
+          triggers: 1
+          total_nodes: 4
+
+    IRSummary:
+      type: object
+      required: [devices, state_variables, triggers, total_nodes]
+      properties:
+        devices:
+          type: integer
+        state_variables:
+          type: integer
+        triggers:
+          type: integer
+        total_nodes:
+          type: integer
+
+    DeployRequest:
+      type: object
+      required: [bytecode_b64, project_id]
+      properties:
+        bytecode_b64:
+          type: string
+          description: Base64-encoded bytecode from `/ir/compile`.
+          example: AAABAAI...
+        project_id:
+          type: string
+          format: uuid
+          description: Project to record the deployment against.
+          example: 9e107d9d-372b-4d4f-83eb-6e9e10843b22
+        transfer_method:
+          type: string
+          enum: [wifi, ble, webserial]
+          default: wifi
+          description: Physical transport used to push bytecode to the device.
+      example:
+        bytecode_b64: AAABAAI...
+        project_id: 9e107d9d-372b-4d4f-83eb-6e9e10843b22
+        transfer_method: wifi
+
+    DeployResponse:
+      type: object
+      required: [status, device_id, transfer_method, message]
+      properties:
+        status:
+          type: string
+          example: deployed
+        device_id:
+          type: string
+          format: uuid
+        transfer_method:
+          type: string
+          example: wifi
+        message:
+          type: string
+          example: Bytecode payload ready for device transfer
+
+    # ── OTA ───────────────────────────────────────────────────────────────────
+
+    OTACheckResponse:
+      type: object
+      required: [has_update, version, size, hash]
+      properties:
+        has_update:
+          type: boolean
+          description: True when the latest compiled project differs from the device's current firmware.
+        version:
+          type: string
+          description: Version identifier (bytecode SHA-256 hash).
+          example: 3b4c2d...
+        size:
+          type: integer
+          description: Bytecode payload size in bytes.
+          example: 248
+        hash:
+          type: string
+          description: SHA-256 hex digest of the latest bytecode.
+          example: 3b4c2d...
+
+    OTAManifestResponse:
+      type: object
+      required: [url, hash, size, version, signature]
+      properties:
+        url:
+          type: string
+          description: Relative URL to stream the bytecode from.
+          example: /api/ota/chunk/7c9e6679-7425-40de-944b-e07fc1f90ae7
+        hash:
+          type: string
+          example: 3b4c2d...
+        size:
+          type: integer
+          example: 248
+        version:
+          type: string
+          example: 3b4c2d...
+        signature:
+          type: string
+          description: hex(SHA-256(hash + device_id)) — integrity check.
+          example: a4c8e1...
+
+    # ── Users ─────────────────────────────────────────────────────────────────
+
+    UserRow:
+      type: object
+      required: [user_id, username, device_count, project_count, created_at]
+      properties:
+        user_id:
+          type: string
+          format: uuid
+          example: b3d1c2e4-0001-0000-0000-000000000001
+        username:
+          type: string
+          example: alice
+        email:
+          type: string
+          format: email
+          nullable: true
+          example: alice@example.com
+        device_count:
+          type: integer
+          example: 3
+        project_count:
+          type: integer
+          example: 5
+        created_at:
+          type: string
+          format: date-time
+          example: "2025-01-15T10:22:00Z"
+        last_login_at:
+          type: string
+          format: date-time
+          nullable: true
+          example: "2026-04-20T08:10:00Z"
+
+    UsersResponse:
+      type: object
+      required: [total, users]
+      properties:
+        total:
+          type: integer
+          description: Total number of registered users (up to 500).
+          example: 42
+        users:
+          type: array
+          items:
+            $ref: '#/components/schemas/UserRow'
+
+    # ── Fleet ─────────────────────────────────────────────────────────────────
+
+    FleetOverviewResponse:
+      type: object
+      required: [total_devices, online_devices, total_projects,
+                 deployed_projects, recent_deploys]
+      properties:
+        total_devices:
+          type: integer
+          example: 5
+        online_devices:
+          type: integer
+          example: 3
+        total_projects:
+          type: integer
+          example: 12
+        deployed_projects:
+          type: integer
+          example: 8
+        recent_deploys:
+          type: array
+          items:
+            $ref: '#/components/schemas/RecentDeploy'
+
+    RecentDeploy:
+      type: object
+      required: [device_name, project_name, deployed_at]
+      properties:
+        device_name:
+          type: string
+          example: Living Room Sensor
+        project_name:
+          type: string
+          example: Temperature Monitor
+        deployed_at:
+          type: string
+          format: date-time
+
+    FleetDevice:
+      type: object
+      required: [device_id, name, board_sku, status, error_count, paired_at]
+      properties:
+        device_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        board_sku:
+          type: string
+        firmware_version:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [online, offline, deploying]
+        ip_address:
+          type: string
+          nullable: true
+        ble_address:
+          type: string
+          nullable: true
+        active_program_id:
+          type: string
+          format: uuid
+          nullable: true
+        error_count:
+          type: integer
+        paired_at:
+          type: string
+          format: date-time
+        last_seen_at:
+          type: string
+          format: date-time
+          nullable: true
+        active_project_name:
+          type: string
+          nullable: true
+
+    # ── Billing ───────────────────────────────────────────────────────────────
+
+    Plan:
+      type: object
+      required: [tier, display_name, monthly_price_usd, llm_intents_per_month,
+                 compiles_per_month, deploys_per_month, max_devices, support, features]
+      properties:
+        tier:
+          type: string
+          enum: [free, hobby, pro, enterprise]
+          example: hobby
+        display_name:
+          type: string
+          example: Hobby
+        monthly_price_usd:
+          type: integer
+          description: Monthly price in USD cents. 0 = free or custom pricing.
+          example: 9
+        llm_intents_per_month:
+          type: integer
+          description: -1 means unlimited.
+          example: 500
+        compiles_per_month:
+          type: integer
+          example: 2000
+        deploys_per_month:
+          type: integer
+          example: 500
+        max_devices:
+          type: integer
+          example: 5
+        support:
+          type: string
+          example: Email
+        features:
+          type: array
+          items:
+            type: string
+
+    SubscriptionView:
+      type: object
+      required: [tier, display_name, monthly_price_usd, status, cancel_at_period_end]
+      properties:
+        tier:
+          type: string
+          example: hobby
+        display_name:
+          type: string
+          example: Hobby
+        monthly_price_usd:
+          type: integer
+          example: 9
+        status:
+          type: string
+          enum: [active, trialing, past_due, canceled, unpaid]
+          example: active
+        current_period_end:
+          type: string
+          format: date-time
+          nullable: true
+        cancel_at_period_end:
+          type: boolean
+          example: false
+
+    UsageCounter:
+      type: object
+      required: [used, limit]
+      properties:
+        used:
+          type: integer
+          example: 42
+        limit:
+          type: integer
+          description: -1 means unlimited.
+          example: 500
+
+    UsageView:
+      type: object
+      required: [period_start, llm_intents, compiles, deploys, devices_active]
+      properties:
+        period_start:
+          type: string
+          format: date-time
+        llm_intents:
+          $ref: '#/components/schemas/UsageCounter'
+        compiles:
+          $ref: '#/components/schemas/UsageCounter'
+        deploys:
+          $ref: '#/components/schemas/UsageCounter'
+        devices_active:
+          $ref: '#/components/schemas/UsageCounter'
+
+    CheckoutRequest:
+      type: object
+      required: [tier, success_url, cancel_url]
+      properties:
+        tier:
+          type: string
+          enum: [hobby, pro]
+          example: hobby
+        success_url:
+          type: string
+          format: uri
+          example: https://app.example.com/billing/success
+        cancel_url:
+          type: string
+          format: uri
+          example: https://app.example.com/billing/cancel
+
+    CheckoutResponse:
+      type: object
+      required: [session_id, url]
+      properties:
+        session_id:
+          type: string
+          description: Stripe Checkout session ID.
+          example: cs_test_a1b2c3...
+        url:
+          type: string
+          format: uri
+          description: Redirect the user to this URL to complete payment.
+          example: https://checkout.stripe.com/pay/cs_test_a1b2c3...
+
+    PortalRequest:
+      type: object
+      required: [return_url]
+      properties:
+        return_url:
+          type: string
+          format: uri
+          example: https://app.example.com/billing
+
+    PortalResponse:
+      type: object
+      required: [url]
+      properties:
+        url:
+          type: string
+          format: uri
+          description: Redirect the user to this URL to manage their subscription.
+
+    # ── Marketplace ───────────────────────────────────────────────────────────
+
+    DriverItem:
+      type: object
+      required: [id, author_id, name, display_name, description, version,
+                 driver_type, bus_types, capabilities, status, downloads,
+                 stars_avg, stars_count, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        author_id:
+          type: string
+          description: UUID of the submitting user.
+        name:
+          type: string
+          description: Machine-readable unique identifier.
+          example: drv_my_custom_sensor
+        display_name:
+          type: string
+          example: My Custom Sensor
+        description:
+          type: string
+          example: Reads pressure from an I2C sensor.
+        version:
+          type: string
+          example: 1.0.0
+        driver_type:
+          type: string
+          example: sensor
+        bus_types:
+          type: array
+          items:
+            type: string
+          example: [i2c]
+        capabilities:
+          type: array
+          items:
+            type: string
+          example: [pressure]
+        status:
+          type: string
+          enum: [pending, approved, rejected]
+          example: approved
+        rejection_reason:
+          type: string
+          nullable: true
+        downloads:
+          type: integer
+          example: 143
+        stars_avg:
+          type: number
+          format: float
+          example: 4.3
+        stars_count:
+          type: integer
+          example: 21
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        validation_json:
+          type: object
+          nullable: true
+          additionalProperties: true
+          description: Static analysis metadata (only on detail endpoint).
+
+    MarketplaceListResponse:
+      type: object
+      required: [drivers, total, page, limit]
+      properties:
+        drivers:
+          type: array
+          items:
+            $ref: '#/components/schemas/DriverItem'
+        total:
+          type: integer
+        page:
+          type: integer
+        limit:
+          type: integer
+
+    SubmitDriverRequest:
+      type: object
+      required: [name, display_name, description, version, driver_type, source_code]
+      properties:
+        name:
+          type: string
+          description: Unique snake_case driver identifier (must not conflict with official drivers).
+          example: drv_my_custom_sensor
+        display_name:
+          type: string
+          example: My Custom Sensor
+        description:
+          type: string
+          example: Reads pressure from an I2C sensor.
+        version:
+          type: string
+          example: 1.0.0
+        driver_type:
+          type: string
+          enum: [sensor, actuator, display, mixed]
+          example: sensor
+        source_code:
+          type: string
+          description: Full C source code for the driver implementation.
+
+    SubmitDriverResponse:
+      type: object
+      required: [id, name, status, message]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        status:
+          type: string
+          example: pending
+        message:
+          type: string
+          example: submitted for review
+
+    RateDriverRequest:
+      type: object
+      required: [stars]
+      properties:
+        stars:
+          type: integer
+          minimum: 1
+          maximum: 5
+          example: 4
+        review:
+          type: string
+          nullable: true
+          example: Works great with my BMP280.
+
+    RejectDriverRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          example: Source code uses dynamic allocation in hot path.
+
+    SourceResponse:
+      type: object
+      required: [source_code]
+      properties:
+        source_code:
+          type: string
+          description: Full C source code of the driver.
+
+    # ── System ────────────────────────────────────────────────────────────────
+
+    HealthResponse:
+      type: object
+      required: [status, version, database, llm_available, registered_drivers]
+      properties:
+        status:
+          type: string
+          enum: [healthy, degraded]
+          example: healthy
+        version:
+          type: string
+          example: 1.0.0
+        database:
+          type: string
+          enum: [connected, disconnected]
+          example: connected
+        llm_available:
+          type: boolean
+          example: true
+        registered_drivers:
+          type: integer
+          description: Number of drivers in the in-memory registry.
+          example: 59
+
+    SystemConfig:
+      type: object
+      required: [max_projects_per_user, max_devices_per_user, llm_model,
+                 llm_rate_limit_per_minute, ir_schema_version, bytecode_version]
+      properties:
+        max_projects_per_user:
+          type: integer
+          example: 100
+        max_devices_per_user:
+          type: integer
+          example: 10
+        llm_model:
+          type: string
+          example: claude-sonnet-4-6
+        llm_rate_limit_per_minute:
+          type: integer
+          example: 10
+        ir_schema_version:
+          type: string
+          example: '1.0'
+        bytecode_version:
+          type: integer
+          example: 1
+
+    DriverSpec:
+      type: object
+      description: Driver specification from the in-memory registry.
+      properties:
+        name:
+          type: string
+          example: drv_dht22
+        display_name:
+          type: string
+          example: DHT22 Temperature & Humidity
+        driver_type:
+          type: string
+          example: sensor
+        bus_types:
+          type: array
+          items:
+            type: string
+        capabilities:
+          type: array
+          items:
+            type: string
+        description:
+          type: string
+
+    BoardSpec:
+      type: object
+      properties:
+        sku:
+          type: string
+          example: esp32s3-devkit-c1
+        name:
+          type: string
+          example: ESP32-S3 DevKit-C1
+        soc:
+          type: string
+          example: ESP32-S3
+        flash_mb:
+          type: integer
+          example: 8
+        psram_mb:
+          type: integer
+          example: 2
+        pin_map:
+          type: object
+          additionalProperties: true
+        default_devices:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+
+    # ── WebSocket frames ──────────────────────────────────────────────────────
+
+    WsConnectedFrame:
+      type: object
+      required: [type, deviceId]
+      properties:
+        type:
+          type: string
+          enum: [connected]
+        deviceId:
+          type: string
+          format: uuid
+
+    WsTelemetryFrame:
+      type: object
+      required: [type, ts, data]
+      properties:
+        type:
+          type: string
+          enum: [telemetry]
+        ts:
+          type: integer
+          description: Unix timestamp (seconds).
+          example: 1745150400
+        data:
+          $ref: '#/components/schemas/TelemetryData'
+
+    TelemetryData:
+      type: object
+      required: [temperature, humidity, uptime_s, free_heap, rssi]
+      properties:
+        temperature:
+          type: number
+          description: Temperature in degrees Celsius.
+          example: 24.7
+        humidity:
+          type: number
+          description: Relative humidity percentage.
+          example: 58.3
+        uptime_s:
+          type: integer
+          description: Device uptime in seconds since WebSocket connection was opened.
+          example: 42
+        free_heap:
+          type: integer
+          description: Free heap memory in bytes.
+          example: 189440
+        rssi:
+          type: integer
+          description: Wi-Fi RSSI in dBm (negative integer).
+          example: -67
+
+    WsPingMessage:
+      type: object
+      required: [type]
+      properties:
+        type:
+          type: string
+          enum: [ping]
+
+    WsPongFrame:
+      type: object
+      required: [type]
+      properties:
+        type:
+          type: string
+          enum: [pong]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Path parameters
+# ─────────────────────────────────────────────────────────────────────────────
+  parameters:
+
+    DeviceId:
+      name: device_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: UUID of the paired device.
+      example: 7c9e6679-7425-40de-944b-e07fc1f90ae7
+
+    ProjectId:
+      name: project_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: UUID of the project.
+      example: 9e107d9d-372b-4d4f-83eb-6e9e10843b22
+
+    DriverId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: UUID of the community driver.
+
+    DriverName:
+      name: driver_name
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Machine-readable driver name (e.g. `drv_dht22`).
+      example: drv_dht22
+
+    BoardId:
+      name: board_id
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Board SKU.
+      example: esp32s3-devkit-c1
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Common responses
+# ─────────────────────────────────────────────────────────────────────────────
+  responses:
+
+    Unauthorized:
+      description: Missing or invalid JWT Bearer token.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorBody'
+          example:
+            error:
+              code: MISSING_TOKEN
+              message: Authorization header required
+
+    NotFound:
+      description: The requested resource does not exist.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorBody'
+          example:
+            error:
+              code: NOT_FOUND
+              message: Device not found
+
+    UnprocessableEntity:
+      description: Request body failed semantic validation.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorBody'
+          example:
+            error:
+              code: VALIDATION_ERROR
+              message: Username must be between 3 and 32 characters
+
+    TooManyRequests:
+      description: |
+        Too many concurrent LLM requests (server-side gate: max 10), or
+        monthly quota exceeded.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorBody'
+          example:
+            error:
+              code: QUOTA_EXCEEDED
+              message: Monthly LLM intent quota reached — upgrade your plan
+
+    InternalServerError:
+      description: Unexpected server error.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorBody'
+          example:
+            error:
+              code: DB_ERROR
+              message: connection pool timed out
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Paths
+# ─────────────────────────────────────────────────────────────────────────────
+paths:
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # Auth
+  # ════════════════════════════════════════════════════════════════════════════
+
+  /auth/register:
+    post:
+      tags: [Auth]
+      summary: Register a new user
+      description: |
+        Creates a new account, hashes the password with PBKDF2-HMAC-SHA256
+        (100 000 iterations), and returns a signed JWT valid for 24 hours.
+        Username must be 3–32 alphanumeric + underscore characters.
+        Password must be at least 8 characters.
+      operationId: register
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+            example:
+              username: ada_lovelace
+              email: ada@example.com
+              password: s3cur3P@ssw0rd
+      responses:
+        '201':
+          description: User created and JWT issued.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+              example:
+                token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+                expires_at: '2026-04-21T12:00:00Z'
+                user_id: 550e8400-e29b-41d4-a716-446655440000
+                username: ada_lovelace
+        '409':
+          description: Username already taken.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error:
+                  code: USERNAME_TAKEN
+                  message: Username is already taken
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Log in
+      description: |
+        Authenticates an existing user with username + password.
+        Returns a new JWT valid for 24 hours and updates `last_login_at`.
+      operationId: login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+            example:
+              username: ada_lovelace
+              password: s3cur3P@ssw0rd
+      responses:
+        '200':
+          description: Authentication successful.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+              example:
+                token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+                expires_at: '2026-04-21T12:00:00Z'
+                user_id: 550e8400-e29b-41d4-a716-446655440000
+                username: ada_lovelace
+        '401':
+          description: Invalid credentials.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error:
+                  code: INVALID_CREDENTIALS
+                  message: Invalid credentials
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /auth/me:
+    get:
+      tags: [Auth]
+      summary: Get current user profile
+      description: Validates the Bearer token and returns the decoded user profile.
+      operationId: getMe
+      responses:
+        '200':
+          description: User profile.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MeResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/me/llm-key:
+    put:
+      tags: [Auth]
+      summary: Save or remove the user's OpenRouter API key (BYOK)
+      description: |
+        Stores or clears the user's own OpenRouter API key. When set, this key
+        takes priority over the server-wide key for all LLM intent requests.
+        Send an empty string to remove the key and fall back to the server key.
+      operationId: setLlmKey
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [api_key]
+              properties:
+                api_key:
+                  type: string
+                  description: OpenRouter API key (sk-or-v1-...). Send empty to clear.
+                  example: "sk-or-v1-abc123"
+      responses:
+        '200':
+          description: Key saved or removed.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "OpenRouter API key saved"
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /auth/verify-email:
+    post:
+      tags: [Auth]
+      summary: Verify email address with a 6-digit code
+      description: |
+        Validates the 6-digit code sent during registration and marks the user's
+        email as verified. Login is blocked until this step completes for users
+        who registered with an email address.
+      operationId: verifyEmail
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, code]
+              properties:
+                username:
+                  type: string
+                code:
+                  type: string
+                  minLength: 6
+                  maxLength: 6
+      responses:
+        '200':
+          description: Email verified successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: Email verified successfully
+        '400':
+          description: Invalid or expired verification code.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /auth/forgot-password:
+    post:
+      tags: [Auth]
+      summary: Request a password-reset code
+      description: |
+        Generates a 6-digit cryptographically random reset code, stores it in
+        the database (15-minute TTL), and logs it.
+        **Always returns 200** regardless of whether the username exists to
+        avoid leaking registered usernames.
+      operationId: forgotPassword
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ForgotPasswordRequest'
+      responses:
+        '200':
+          description: Generic message (regardless of whether user exists).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: If that username exists, a reset code has been sent
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /auth/reset-password:
+    post:
+      tags: [Auth]
+      summary: Reset password with a code
+      description: |
+        Validates the 6-digit reset code and, if valid, updates the password
+        hash and marks the token used.
+      operationId: resetPassword
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResetPasswordRequest'
+      responses:
+        '200':
+          description: Password changed successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: Password reset successfully
+        '400':
+          description: Invalid or expired reset code, or password too short.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # Devices
+  # ════════════════════════════════════════════════════════════════════════════
+
+  /devices:
+    get:
+      tags: [Devices]
+      summary: List paired devices
+      description: Returns all devices paired to the authenticated user, ordered by pairing date.
+      operationId: listDevices
+      responses:
+        '200':
+          description: List of paired devices.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /devices/pair:
+    post:
+      tags: [Devices]
+      summary: Pair a new device
+      description: |
+        Associates a physical board with the authenticated user account.
+        The `device_uuid` must match the UUID burned into the device firmware.
+        Rejects duplicate pairings with HTTP 409.
+      operationId: pairDevice
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PairDeviceRequest'
+            example:
+              device_uuid: 7c9e6679-7425-40de-944b-e07fc1f90ae7
+              board_sku: esp32s3-devkit-c1
+              device_pubkey: MCowBQYDK2VdAyEA...
+              name: Living Room Sensor
+      responses:
+        '201':
+          description: Device paired.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: Device already paired.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error:
+                  code: ALREADY_PAIRED
+                  message: Device already paired
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /devices/{device_id}:
+    get:
+      tags: [Devices]
+      summary: Get device details
+      description: Fetches details of a single device owned by the authenticated user.
+      operationId: getDevice
+      parameters:
+        - $ref: '#/components/parameters/DeviceId'
+      responses:
+        '200':
+          description: Device details.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    patch:
+      tags: [Devices]
+      summary: Update device metadata
+      description: |
+        Updates mutable device fields. Currently only `name` is patchable.
+        Returns the full updated device object.
+      operationId: updateDevice
+      parameters:
+        - $ref: '#/components/parameters/DeviceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateDeviceRequest'
+      responses:
+        '200':
+          description: Updated device.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    delete:
+      tags: [Devices]
+      summary: Unpair a device
+      description: |
+        Removes the device from the authenticated user's account.
+        This does **not** wipe the firmware on the device.
+      operationId: unpairDevice
+      parameters:
+        - $ref: '#/components/parameters/DeviceId'
+      responses:
+        '204':
+          description: Device unpaired successfully.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # Projects
+  # ════════════════════════════════════════════════════════════════════════════
+
+  /projects:
+    get:
+      tags: [Projects]
+      summary: List projects
+      description: |
+        Returns projects owned by the authenticated user.
+        Supports optional filtering by `device_id` and pagination via
+        `limit` (default 50) and `offset`.
+      operationId: listProjects
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: device_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+          description: Filter to projects targeting a specific device.
+      responses:
+        '200':
+          description: Paginated project list.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    post:
+      tags: [Projects]
+      summary: Create a project
+      description: |
+        Creates a new project bound to a paired device.
+        Optionally attach an IR document at creation time.
+      operationId: createProject
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateProjectRequest'
+            example:
+              name: Temperature Monitor
+              device_id: 7c9e6679-7425-40de-944b-e07fc1f90ae7
+              description: Reads DHT22 every 30 s and turns on fan above 28 °C
+      responses:
+        '201':
+          description: Project created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /projects/{project_id}:
+    get:
+      tags: [Projects]
+      summary: Get project details
+      operationId: getProject
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '200':
+          description: Project details.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    put:
+      tags: [Projects]
+      summary: Update a project
+      description: |
+        Partial update: pass only the fields you want to change.
+        Omitted fields keep their current values (`COALESCE` semantics).
+      operationId: updateProject
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateProjectRequest'
+      responses:
+        '200':
+          description: Updated project.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    delete:
+      tags: [Projects]
+      summary: Delete a project
+      operationId: deleteProject
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '204':
+          description: Project deleted.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # LLM
+  # ════════════════════════════════════════════════════════════════════════════
+
+  /llm/intent:
+    post:
+      tags: [LLM]
+      summary: Process a natural-language intent
+      description: |
+        Converts a plain-English description of IoT behaviour into a validated
+        IR document using Claude (primary) or OpenRouter (fallback).
+
+        The response is either:
+        - **feasible=true** — includes the full IR document, an `ir_preview`
+          summary, and a `validation` result from the 8-step IR validator.
+        - **feasible=false** — includes `reason`, optional `clarifications`,
+          and optional `suggestions`.
+
+        **Quota:** counted against `llm_intents_per_month` for the billing period.
+        Quota is only charged on successful generation.
+
+        **Rate limit:** max 10 concurrent LLM requests server-wide (HTTP 429
+        if exceeded).
+      operationId: processIntent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IntentRequest'
+            example:
+              description: Read temperature every 30 seconds. If above 28°C, turn on the fan relay.
+              board_id: esp32s3-devkit-c1
+      responses:
+        '200':
+          description: Intent processed (check `feasible` field).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IntentResponse'
+              example:
+                feasible: true
+                llm_model: claude-sonnet-4-6
+                generation_time_ms: 487
+                ir_preview:
+                  summary: 1 pipeline(s) with 1 trigger(s), 1 sensor(s), 1 actuator(s)
+                  triggers:
+                    - description: Every 30 seconds
+                      interval: 30000ms
+                  actions: []
+                  sensors_used: ['temp_sensor (drv_dht22)']
+                  actuators_used: ['relay_fan (drv_relay)']
+                validation:
+                  valid: true
+                  errors: []
+                  warnings: []
+                  steps_completed: 8
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          description: LLM returned an error or the IR failed validation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          description: LLM API key not configured.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error:
+                  code: LLM_NOT_CONFIGURED
+                  message: Set ANTHROPIC_API_KEY environment variable
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # IR
+  # ════════════════════════════════════════════════════════════════════════════
+
+  /ir/validate:
+    post:
+      tags: [IR]
+      summary: Validate an IR document
+      description: |
+        Runs the 8-step IR validation pipeline without compiling.
+        Useful for checking a hand-crafted or LLM-generated IR document before
+        spending a compile quota unit.
+      operationId: validateIR
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IRDocument'
+      responses:
+        '200':
+          description: Validation result (check `valid` field).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /ir/compile:
+    post:
+      tags: [IR]
+      summary: Compile an IR document to bytecode
+      description: |
+        Validates the IR through all 8 steps, then compiles it to a signed
+        bytecode payload. The resulting `bytecode_b64` is passed to
+        `POST /ir/deploy/{device_id}`.
+
+        **Quota:** counted against `compiles_per_month`.
+      operationId: compileIR
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CompileRequest'
+            example:
+              device_id: 7c9e6679-7425-40de-944b-e07fc1f90ae7
+              ir:
+                version: '1.0'
+                program_id: prog_abc123
+                board_id: esp32s3-devkit-c1
+                created_at: '2026-04-20T10:00:00Z'
+                signature: ''
+                devices:
+                  - id: temp_sensor
+                    driver: drv_dht22
+                    bus: gpio
+                    pin_slot: '4'
+                    capabilities: [temperature, humidity]
+                pipelines:
+                  - id: pipe_main
+                    trigger: trig_timer
+                    max_execution_ms: 500
+                    nodes: []
+      responses:
+        '200':
+          description: Compilation successful.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompileResult'
+              example:
+                bytecode_b64: AAABAAI...
+                bytecode_size: 248
+                bytecode_hash: 3b4c2d...
+                num_instructions: 12
+                num_constants: 4
+                num_pipelines: 1
+                ir_summary:
+                  devices: 2
+                  state_variables: 1
+                  triggers: 1
+                  total_nodes: 4
+        '400':
+          description: IR validation failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          description: Compilation error after validation passed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /ir/deploy/{device_id}:
+    post:
+      tags: [IR]
+      summary: Deploy compiled bytecode to a device
+      description: |
+        Records the deployment in the database, updates the project's
+        `last_deployed_at` and `bytecode_hash`, and sets the device's
+        `active_program_id`. The bytecode is not pushed over-the-air here —
+        the device must pull it via the OTA endpoints or a direct transport
+        (Wi-Fi TCP / BLE / WebSerial).
+
+        **Quota:** counted against `deploys_per_month`.
+      operationId: deployBytecode
+      parameters:
+        - $ref: '#/components/parameters/DeviceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeployRequest'
+            example:
+              bytecode_b64: AAABAAI...
+              project_id: 9e107d9d-372b-4d4f-83eb-6e9e10843b22
+              transfer_method: wifi
+      responses:
+        '200':
+          description: Deployment recorded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeployResponse'
+              example:
+                status: deployed
+                device_id: 7c9e6679-7425-40de-944b-e07fc1f90ae7
+                transfer_method: wifi
+                message: Bytecode payload ready for device transfer
+        '400':
+          description: Invalid bytecode payload (base64 decode error).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Device is already in a deploying state.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error:
+                  code: DEVICE_BUSY
+                  message: Device is busy with another deployment
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # OTA
+  # ════════════════════════════════════════════════════════════════════════════
+
+  /ota/check/{device_id}:
+    get:
+      tags: [OTA]
+      summary: Check for an OTA update
+      description: |
+        Compares the device's current `firmware_version` against the hash of
+        the latest compiled project. Returns `has_update: true` when they differ.
+        Requires JWT Bearer auth.
+      operationId: otaCheck
+      parameters:
+        - $ref: '#/components/parameters/DeviceId'
+      responses:
+        '200':
+          description: OTA check result.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OTACheckResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /ota/manifest/{device_id}:
+    get:
+      tags: [OTA]
+      summary: Get OTA update manifest
+      description: |
+        Returns the full update manifest including the download URL, SHA-256
+        hash, size, and a server-side integrity signature.
+        Requires JWT Bearer auth.
+      operationId: otaManifest
+      parameters:
+        - $ref: '#/components/parameters/DeviceId'
+      responses:
+        '200':
+          description: OTA manifest.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OTAManifestResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /ota/chunk/{device_id}:
+    get:
+      tags: [OTA]
+      summary: Stream firmware bytecode
+      description: |
+        Device-facing endpoint. Returns the raw bytecode payload as
+        `application/octet-stream`. No JWT required; authentication is via the
+        `X-Device-Key` header (device provisioning key).
+      operationId: otaChunk
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/DeviceId'
+        - name: X-Device-Key
+          in: header
+          required: true
+          schema:
+            type: string
+          description: Device provisioning key (non-empty string).
+      responses:
+        '200':
+          description: Raw bytecode payload.
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '401':
+          description: Missing X-Device-Key header.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # Fleet
+  # ════════════════════════════════════════════════════════════════════════════
+
+  /fleet/overview:
+    get:
+      tags: [Fleet]
+      summary: Fleet overview statistics
+      description: |
+        Aggregated stats for the authenticated user's fleet:
+        total/online devices, total/deployed projects, and the last 10 deploys.
+      operationId: fleetOverview
+      responses:
+        '200':
+          description: Fleet overview.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FleetOverviewResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /fleet/devices:
+    get:
+      tags: [Fleet]
+      summary: Fleet device list
+      description: |
+        Full device list for the authenticated user's fleet, joined with the
+        active project name (if any).
+      operationId: fleetDevices
+      responses:
+        '200':
+          description: List of fleet devices with active project names.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/FleetDevice'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /fleet/devices/{device_id}/ping:
+    post:
+      tags: [Fleet]
+      summary: Ping a device (update last_seen_at)
+      description: |
+        Sets `last_seen_at = NOW()` for the specified device.
+        Used by mobile apps and the firmware to indicate the device is alive.
+      operationId: fleetPingDevice
+      parameters:
+        - $ref: '#/components/parameters/DeviceId'
+      responses:
+        '200':
+          description: Ping recorded.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # Users (admin)
+  # ════════════════════════════════════════════════════════════════════════════
+
+  /users:
+    get:
+      tags: [Auth]
+      summary: List registered users
+      description: |
+        Returns a paginated list of all registered users together with their
+        device and project counts. Requires a valid JWT. Useful for admin
+        dashboards and analytics.
+      operationId: listUsers
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: User listing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UsersResponse'
+              example:
+                total: 2
+                users:
+                  - user_id: "b3d1c2e4-0001-0000-0000-000000000001"
+                    username: "alice"
+                    email: "alice@example.com"
+                    device_count: 3
+                    project_count: 5
+                    created_at: "2025-01-15T10:22:00Z"
+                    last_login_at: "2026-04-20T08:10:00Z"
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # Telemetry WebSocket
+  # ════════════════════════════════════════════════════════════════════════════
+
+  /telemetry/ws/{device_id}:
+    get:
+      tags: [Telemetry]
+      summary: Open a WebSocket telemetry stream
+      description: |
+        Upgrades the HTTP connection to a WebSocket.
+        The JWT must be passed as `?token=<jwt>` (WebSocket handshake cannot
+        set the `Authorization` header).
+
+        **Server → client frames (JSON text):**
+
+        | `type` | When | Description |
+        |--------|------|-------------|
+        | `connected` | Immediately on open | Confirms device ID. |
+        | `telemetry` | Every 2 s | Live sensor snapshot. |
+        | `pong` | After client sends `{"type":"ping"}` | Keep-alive reply. |
+
+        **Client → server frames (JSON text):**
+
+        | `type` | Description |
+        |--------|-------------|
+        | `ping` | Keep-alive; server replies with `pong`. |
+
+        **Connection closes** when the client disconnects or sends a close frame.
+      operationId: telemetryWs
+      parameters:
+        - $ref: '#/components/parameters/DeviceId'
+        - name: token
+          in: query
+          required: true
+          schema:
+            type: string
+          description: JWT Bearer token (same token used in the Authorization header elsewhere).
+      responses:
+        '101':
+          description: Switching Protocols — WebSocket connection established.
+          headers:
+            Upgrade:
+              schema:
+                type: string
+                example: websocket
+            Connection:
+              schema:
+                type: string
+                example: Upgrade
+        '401':
+          description: Missing or invalid token query parameter.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+              example:
+                error:
+                  code: MISSING_TOKEN
+                  message: token query parameter required
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # Billing
+  # ════════════════════════════════════════════════════════════════════════════
+
+  /billing/plans:
+    get:
+      tags: [Billing]
+      summary: List available plans
+      description: |
+        Public endpoint — no authentication required.
+        Returns the full plan catalog used by the pricing page.
+      operationId: listPlans
+      security: []
+      responses:
+        '200':
+          description: Plan catalog.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Plan'
+
+  /billing/me:
+    get:
+      tags: [Billing]
+      summary: Get subscription status
+      description: Returns the authenticated user's current plan tier and subscription state.
+      operationId: getMySubscription
+      responses:
+        '200':
+          description: Current subscription.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubscriptionView'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /billing/usage:
+    get:
+      tags: [Billing]
+      summary: Get current billing-period usage
+      description: Returns quota usage counters for the current billing period.
+      operationId: getMyUsage
+      responses:
+        '200':
+          description: Usage counters.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UsageView'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /billing/checkout:
+    post:
+      tags: [Billing]
+      summary: Create a Stripe Checkout session
+      description: |
+        Creates a Stripe Checkout session for upgrading to Hobby or Pro.
+        Lazily creates a Stripe customer if one does not exist.
+        Redirect the user's browser to the returned `url`.
+      operationId: createCheckout
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CheckoutRequest'
+            example:
+              tier: hobby
+              success_url: https://app.example.com/billing/success
+              cancel_url: https://app.example.com/billing/cancel
+      responses:
+        '200':
+          description: Checkout session created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CheckoutResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '402':
+          description: Invalid plan tier or no Stripe price configured.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /billing/portal:
+    post:
+      tags: [Billing]
+      summary: Create a Stripe Billing Portal session
+      description: |
+        Creates a Stripe Billing Portal session so the user can manage their
+        subscription, update payment method, or cancel.
+        Redirect the user's browser to the returned `url`.
+      operationId: createPortal
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PortalRequest'
+            example:
+              return_url: https://app.example.com/billing
+      responses:
+        '200':
+          description: Portal session created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PortalResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /billing/webhook:
+    post:
+      tags: [Billing]
+      summary: Stripe webhook receiver
+      description: |
+        Receives and processes Stripe webhook events (subscription updates,
+        payment successes/failures). The Stripe-Signature header is verified
+        using HMAC-SHA256. **Do not call this endpoint from your application.**
+      operationId: stripeWebhook
+      security: []
+      parameters:
+        - name: Stripe-Signature
+          in: header
+          required: true
+          schema:
+            type: string
+          description: Stripe webhook signature (set by Stripe, not by your code).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+              description: Raw Stripe event payload.
+      responses:
+        '200':
+          description: Webhook processed successfully.
+        '400':
+          description: Invalid payload or missing signature.
+        '401':
+          description: Stripe signature verification failed.
+        '500':
+          description: Webhook handler error.
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # Marketplace
+  # ════════════════════════════════════════════════════════════════════════════
+
+  /marketplace:
+    get:
+      tags: [Marketplace]
+      summary: Browse approved community drivers
+      description: |
+        Public endpoint — no authentication required.
+        Supports full-text search and filtering by type, bus, and capability.
+        Sort options: `newest` (default), `downloads`, `stars`.
+      operationId: listMarketplaceDrivers
+      security: []
+      parameters:
+        - name: search
+          in: query
+          schema:
+            type: string
+          description: Full-text search across name, display_name, and description.
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [sensor, actuator, display, mixed]
+        - name: bus
+          in: query
+          schema:
+            type: string
+          description: Filter by bus type (e.g. `i2c`, `spi`, `gpio`).
+        - name: capability
+          in: query
+          schema:
+            type: string
+          description: Filter by capability keyword (e.g. `temperature`).
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [newest, downloads, stars]
+            default: newest
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+            maximum: 100
+      responses:
+        '200':
+          description: Paginated driver list.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MarketplaceListResponse'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /marketplace/submit:
+    post:
+      tags: [Marketplace]
+      summary: Submit a community driver
+      description: |
+        Submits a new driver for moderation review.
+        Requires Hobby or Pro plan (`402` otherwise).
+        The source code is analysed statically to detect bus types, capabilities,
+        and common issues. Submission status starts as `pending`.
+      operationId: submitDriver
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubmitDriverRequest'
+      responses:
+        '201':
+          description: Driver submitted for review.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubmitDriverResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '402':
+          description: Free plan — upgrade required to submit drivers.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '409':
+          description: A driver with this name already exists.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '422':
+          description: Static validation failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /marketplace/my/submissions:
+    get:
+      tags: [Marketplace]
+      summary: List my driver submissions
+      description: Returns all submissions by the authenticated user in all statuses.
+      operationId: listMySubmissions
+      responses:
+        '200':
+          description: My submissions.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DriverItem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /marketplace/my/submissions/{id}:
+    delete:
+      tags: [Marketplace]
+      summary: Withdraw a pending submission
+      description: |
+        Withdraws a submission. Only the author can withdraw, and only while
+        the status is `pending`.
+      operationId: withdrawSubmission
+      parameters:
+        - $ref: '#/components/parameters/DriverId'
+      responses:
+        '204':
+          description: Submission withdrawn.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Submission not found, not owned by you, or not pending.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /marketplace/{id}:
+    get:
+      tags: [Marketplace]
+      summary: Get a driver's public details
+      description: |
+        Returns a single approved driver and increments its download counter
+        asynchronously (does not block the response).
+      operationId: getMarketplaceDriver
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/DriverId'
+      responses:
+        '200':
+          description: Driver details.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DriverItem'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /marketplace/{id}/source:
+    get:
+      tags: [Marketplace]
+      summary: Get driver source code
+      description: |
+        Returns the full C source code for an approved driver.
+        Requires auth and Hobby or Pro plan.
+      operationId: getDriverSource
+      parameters:
+        - $ref: '#/components/parameters/DriverId'
+      responses:
+        '200':
+          description: Driver source code.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SourceResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '402':
+          description: Free plan — upgrade required to view source code.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /marketplace/{id}/rate:
+    post:
+      tags: [Marketplace]
+      summary: Rate a driver
+      description: Submit or update a 1–5 star rating, optionally with a review comment.
+      operationId: rateDriver
+      parameters:
+        - $ref: '#/components/parameters/DriverId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RateDriverRequest'
+      responses:
+        '204':
+          description: Rating recorded.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: Stars value out of range (must be 1–5).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /marketplace/{id}/install:
+    post:
+      tags: [Marketplace]
+      summary: Install a driver
+      description: |
+        Records an install for the authenticated user. Returns 201 on first
+        install, 200 on subsequent installs (idempotent).
+      operationId: installDriver
+      parameters:
+        - $ref: '#/components/parameters/DriverId'
+      responses:
+        '200':
+          description: Driver already installed previously — idempotent success.
+        '201':
+          description: Driver installed for the first time.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /marketplace/admin/approve/{id}:
+    post:
+      tags: [Marketplace]
+      summary: Approve a driver submission (admin only)
+      description: Sets the driver's status to `approved`. Requires the `admin` role.
+      operationId: adminApproveDriver
+      parameters:
+        - $ref: '#/components/parameters/DriverId'
+      responses:
+        '204':
+          description: Driver approved.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Admin role required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /marketplace/admin/reject/{id}:
+    post:
+      tags: [Marketplace]
+      summary: Reject a driver submission (admin only)
+      description: Sets the driver's status to `rejected` with a mandatory reason. Requires the `admin` role.
+      operationId: adminRejectDriver
+      parameters:
+        - $ref: '#/components/parameters/DriverId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RejectDriverRequest'
+      responses:
+        '204':
+          description: Driver rejected.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Admin role required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: Rejection reason was empty.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # System
+  # ════════════════════════════════════════════════════════════════════════════
+
+  /system/health:
+    get:
+      tags: [System]
+      summary: Health check
+      description: |
+        Returns overall system health. Checks database connectivity and LLM
+        configuration. Suitable for uptime monitors. Always HTTP 200.
+      operationId: healthCheck
+      security: []
+      responses:
+        '200':
+          description: Health status.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              example:
+                status: healthy
+                version: 1.0.0
+                database: connected
+                llm_available: true
+                registered_drivers: 59
+
+  /system/ready:
+    get:
+      tags: [System]
+      summary: Readiness probe
+      description: |
+        Kubernetes-style readiness probe. Returns HTTP 200 only when the
+        database is reachable. Returns 503 if the database is down.
+        Response body is a plain-text string (`ready` or `db unavailable`).
+      operationId: readinessCheck
+      security: []
+      responses:
+        '200':
+          description: Service is ready.
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: ready
+        '503':
+          description: Database not reachable.
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: db unavailable
+
+  /system/metrics:
+    get:
+      tags: [System]
+      summary: Prometheus metrics
+      description: |
+        Prometheus text-exposition format (version 0.0.4). Scraped by
+        Prometheus / Grafana Agent. Exposes request counters (2xx/4xx/5xx),
+        LLM intent count, and compile count.
+      operationId: prometheusMetrics
+      security: []
+      responses:
+        '200':
+          description: Prometheus metrics in text format.
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: |
+                  # HELP parakram_requests_total Total HTTP requests
+                  # TYPE parakram_requests_total counter
+                  parakram_requests_total 1234
+
+  /system/config:
+    get:
+      tags: [System]
+      summary: System configuration
+      description: Returns server-side configuration constants useful for client-side enforcement.
+      operationId: getSystemConfig
+      security: []
+      responses:
+        '200':
+          description: System config.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SystemConfig'
+
+  /drivers:
+    get:
+      tags: [System]
+      summary: List all registered drivers
+      description: |
+        Returns the complete in-memory driver registry (59 drivers).
+        Public — no authentication required.
+      operationId: listDrivers
+      security: []
+      responses:
+        '200':
+          description: Driver registry.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [drivers, total]
+                properties:
+                  drivers:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/DriverSpec'
+                  total:
+                    type: integer
+                    example: 59
+
+  /drivers/{driver_name}:
+    get:
+      tags: [System]
+      summary: Get a single driver spec
+      description: Looks up a driver by its machine-readable name in the registry.
+      operationId: getDriverSpec
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/DriverName'
+      responses:
+        '200':
+          description: Driver specification.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DriverSpec'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /boards:
+    get:
+      tags: [System]
+      summary: List supported boards
+      description: |
+        Returns all board SKUs from the `board_skus` table.
+        Public — no authentication required.
+      operationId: listBoards
+      security: []
+      responses:
+        '200':
+          description: Board list.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [boards]
+                properties:
+                  boards:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        sku:
+                          type: string
+                          example: esp32s3-devkit-c1
+                        name:
+                          type: string
+                          example: ESP32-S3 DevKit-C1
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /boards/{board_id}:
+    get:
+      tags: [System]
+      summary: Get a board specification
+      description: Returns full details of a board including pin map and default devices.
+      operationId: getBoardSpec
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/BoardId'
+      responses:
+        '200':
+          description: Board specification.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BoardSpec'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'

@@ -1,0 +1,32 @@
+site_name: Parakram Hardware Compiler
+site_description: Zero-Code Autonomous Hardware Compilation
+site_url: https://parakram.github.io/
+repo_url: https://github.com/parakram/parakram
+repo_name: parakram/parakram
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  logo: assets/lightning.png
+  palette:
+    - scheme: slate
+      primary: indigo
+      accent: cyan
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+
+nav:
+  - Welcome: index.md
+  - Getting Started:
+    - Setup & Installation: getting_started/setup.md
+    - Web Serial Flasher: getting_started/flasher.md
+  - Architecture:
+    - AI Pipeline: architecture/ai_pipeline.md
+    - Compiler Bytecode: architecture/compiler.md
+    - Firmware C-HAL: architecture/firmware.md
+  - Contributing: contributing.md
