@@ -8,7 +8,7 @@ const App = (() => {
   let baseUrl  = localStorage.getItem('pk_base_url') || 'http://localhost:8400';
   let token    = localStorage.getItem('pk_token') || null;
   let currentStep  = 1;
-  let selectedBoard = 'esp32s3';
+  let selectedBoard = 'VDYT-S3-R1';
   let pendingIR     = null;   // raw IR from /api/llm/intent
   let compileData   = null;   // result from /api/ir/compile
   let authResolve   = null;   // resolve fn for login promise
