@@ -674,6 +674,9 @@
       Parakram
     </a>
     <div class="nav-right">
+      <a href="lvgl.html" style="color:var(--text-2);text-decoration:none;font-size:13px;margin-right:12px">LVGL Studio</a>
+      <a href="flasher.html" style="color:var(--text-2);text-decoration:none;font-size:13px;margin-right:12px">WebFlasher</a>
+      <button class="btn-login" style="background:transparent;border:1px solid rgba(255,255,255,0.15);font-size:12px;padding:6px 12px;cursor:pointer;color:var(--text-2);border-radius:6px;margin-right:8px" onclick="openIssueModal()">🐛 Report Issue</button>
       <div class="status-badge offline" id="statusBadge">
         <div class="status-dot"></div>
         <span id="statusLabel">Checking…</span>
@@ -877,11 +880,75 @@
       </div>
 
     </div><!-- /wizard-wrap -->
+
+    <!-- Pricing Section -->
+    <section style="max-width:800px;margin:60px auto 40px;padding:0 20px">
+      <h2 style="text-align:center;font-size:24px;color:#f4f4fb;margin:0 0 8px">Simple, Fair Pricing</h2>
+      <p style="text-align:center;font-size:14px;color:#8888aa;margin:0 0 30px">A gift to the world. Build hardware in plain English.</p>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+        <!-- Free -->
+        <div style="background:rgba(26,26,46,0.65);border:1px solid rgba(255,255,255,0.08);border-radius:16px;padding:28px;text-align:center">
+          <div style="font-size:13px;color:#8888aa;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">Free</div>
+          <div style="font-size:36px;font-weight:700;color:#f4f4fb">₹0</div>
+          <div style="font-size:13px;color:#8888aa;margin-bottom:20px">forever</div>
+          <ul style="text-align:left;list-style:none;padding:0;margin:0 0 20px;font-size:13px;color:#b4b4cc;line-height:2">
+            <li>✓ 2 projects</li>
+            <li>✓ 2 devices</li>
+            <li>✓ All 63 drivers</li>
+            <li>✓ LVGL visual designer</li>
+            <li>✓ WebSerial flasher</li>
+            <li>✓ 50 AI compilations/mo</li>
+          </ul>
+          <div style="padding:10px 20px;border:1px solid rgba(255,255,255,0.15);border-radius:8px;color:#8888aa;font-size:14px">Current Plan</div>
+        </div>
+        <!-- Maker -->
+        <div style="background:linear-gradient(135deg,rgba(124,108,240,0.15),rgba(91,140,240,0.15));border:1px solid rgba(124,108,240,0.3);border-radius:16px;padding:28px;text-align:center;position:relative;overflow:hidden">
+          <div style="position:absolute;top:12px;right:-30px;background:linear-gradient(135deg,#7c6cf0,#5b8cf0);color:white;font-size:10px;font-weight:700;padding:4px 36px;transform:rotate(45deg);letter-spacing:1px">BEST VALUE</div>
+          <div style="font-size:13px;color:#a78bfa;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">Maker</div>
+          <div style="font-size:36px;font-weight:700;color:#f4f4fb">₹125<span style="font-size:16px;color:#8888aa;font-weight:400">/mo</span></div>
+          <div style="font-size:13px;color:#8888aa;margin-bottom:20px">~$1.50 · Pay via UPI</div>
+          <ul style="text-align:left;list-style:none;padding:0;margin:0 0 20px;font-size:13px;color:#b4b4cc;line-height:2">
+            <li>✓ <strong style="color:#f4f4fb">Unlimited</strong> projects</li>
+            <li>✓ 10 devices</li>
+            <li>✓ Everything in Free</li>
+            <li>✓ Priority email support</li>
+            <li>✓ OTA firmware updates</li>
+            <li>✓ Project sync across devices</li>
+            <li>✓ Community marketplace</li>
+          </ul>
+          <button onclick="openUpgradeModal()" style="width:100%;padding:12px;background:linear-gradient(135deg,#7c6cf0,#5b8cf0);border:none;border-radius:8px;color:white;font-size:14px;font-weight:600;cursor:pointer;transition:transform 0.2s" onmouseover="this.style.transform='scale(1.03)'" onmouseout="this.style.transform='scale(1)'">Upgrade via UPI →</button>
+        </div>
+      </div>
+    </section>
   </main>
+
+  <!-- Upgrade Modal (UPI) -->
+  <div id="upgradeModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9999;align-items:center;justify-content:center">
+    <div style="background:#13132a;border:1px solid rgba(124,108,240,0.3);border-radius:16px;padding:32px;max-width:440px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,0.6)">
+      <h3 style="margin:0 0 4px;font-size:18px;color:#f4f4fb">⚡ Upgrade to Maker</h3>
+      <p style="margin:0 0 20px;font-size:13px;color:#8888aa">Pay ₹125 via any UPI app, then enter your transaction reference below.</p>
+
+      <div style="background:#0a0a1a;border:1px solid rgba(255,255,255,0.1);border-radius:12px;padding:20px;margin-bottom:16px;text-align:center">
+        <div style="font-size:12px;color:#8888aa;margin-bottom:8px">Pay to this UPI ID:</div>
+        <div style="font-size:20px;font-weight:700;color:#a78bfa;letter-spacing:0.5px" id="upiIdDisplay">varshinicb@okicici</div>
+        <div style="font-size:28px;font-weight:700;color:#f4f4fb;margin:12px 0">₹125</div>
+        <button onclick="navigator.clipboard.writeText(document.getElementById('upiIdDisplay').textContent);this.textContent='Copied!';setTimeout(()=>this.textContent='Copy UPI ID',1500)" style="padding:6px 16px;background:transparent;border:1px solid rgba(255,255,255,0.15);border-radius:6px;color:#8888aa;cursor:pointer;font-size:12px">Copy UPI ID</button>
+      </div>
+
+      <div style="font-size:12px;color:#8888aa;margin-bottom:12px">After paying, enter your <strong style="color:#f4f4fb">UTR / Transaction Reference</strong>:</div>
+      <input id="upgradeUtr" type="text" placeholder="e.g. 412345678901" style="width:100%;padding:10px 14px;background:#0a0a1a;border:1px solid rgba(255,255,255,0.1);border-radius:8px;color:#f4f4fb;font-size:14px;margin-bottom:16px;box-sizing:border-box">
+
+      <div style="display:flex;gap:10px">
+        <button onclick="closeUpgradeModal()" style="flex:1;padding:10px;background:transparent;border:1px solid rgba(255,255,255,0.15);border-radius:8px;color:#8888aa;cursor:pointer;font-size:14px">Cancel</button>
+        <button id="upgradeSubmitBtn" onclick="submitUpgrade()" style="flex:2;padding:10px;background:linear-gradient(135deg,#7c6cf0,#5b8cf0);border:none;border-radius:8px;color:white;cursor:pointer;font-size:14px;font-weight:600">Submit & Activate</button>
+      </div>
+      <p id="upgradeStatus" style="margin:12px 0 0;font-size:12px;display:none;text-align:center"></p>
+    </div>
+  </div>
 
   <!-- Footer -->
   <footer class="footer">
-    <div class="footer-brand">Built by <strong>Vidyuthlabs</strong> · Parakram Playground</div>
+    <div class="footer-brand">Built by <strong>Vidyuthlabs</strong> · Parakram Playground · <a href="mailto:varshinicb@vidyuthlabs.co.in" style="color:#7c6cf0;text-decoration:none">Contact</a></div>
     <div class="footer-url">
       <div class="footer-url-label">Backend URL</div>
       <input class="footer-url-input" id="baseUrlInput" type="text" value="http://localhost:8400" />
@@ -930,8 +997,143 @@
     </div>
   </div>
 
-  <!-- Toast container -->
-  <div class="toast-wrap" id="toastWrap"></div>
+  <!-- Issue Report Modal -->
+  <div id="issueModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9999;display:none;align-items:center;justify-content:center">
+    <div style="background:#13132a;border:1px solid rgba(255,255,255,0.1);border-radius:16px;padding:32px;max-width:480px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,0.6)">
+      <h3 style="margin:0 0 4px;font-size:18px;color:#f4f4fb">🐛 Report an Issue</h3>
+      <p style="margin:0 0 20px;font-size:13px;color:#8888aa">Issues are emailed directly to the Parakram team.</p>
+      <input id="issueTitle" type="text" placeholder="Issue title" style="width:100%;padding:10px 14px;background:#0a0a1a;border:1px solid rgba(255,255,255,0.1);border-radius:8px;color:#f4f4fb;font-size:14px;margin-bottom:10px;box-sizing:border-box">
+      <textarea id="issueDesc" rows="5" placeholder="Describe the issue in detail..." style="width:100%;padding:10px 14px;background:#0a0a1a;border:1px solid rgba(255,255,255,0.1);border-radius:8px;color:#f4f4fb;font-size:14px;resize:vertical;margin-bottom:10px;box-sizing:border-box;font-family:inherit"></textarea>
+      <input id="issueEmail" type="email" placeholder="Your email (optional)" style="width:100%;padding:10px 14px;background:#0a0a1a;border:1px solid rgba(255,255,255,0.1);border-radius:8px;color:#f4f4fb;font-size:14px;margin-bottom:10px;box-sizing:border-box">
+      <select id="issueSeverity" style="width:100%;padding:10px 14px;background:#0a0a1a;border:1px solid rgba(255,255,255,0.1);border-radius:8px;color:#f4f4fb;font-size:14px;margin-bottom:16px;box-sizing:border-box">
+        <option value="low">Low — cosmetic / minor</option>
+        <option value="medium" selected>Medium — broken feature</option>
+        <option value="high">High — can't use the platform</option>
+        <option value="critical">Critical — data loss / security</option>
+      </select>
+      <div style="display:flex;gap:10px">
+        <button onclick="closeIssueModal()" style="flex:1;padding:10px;background:transparent;border:1px solid rgba(255,255,255,0.15);border-radius:8px;color:#8888aa;cursor:pointer;font-size:14px">Cancel</button>
+        <button id="issueSubmitBtn" onclick="submitIssue()" style="flex:2;padding:10px;background:linear-gradient(135deg,#7c6cf0,#5b8cf0);border:none;border-radius:8px;color:white;cursor:pointer;font-size:14px;font-weight:600">Submit Issue</button>
+      </div>
+      <p id="issueStatus" style="margin:12px 0 0;font-size:12px;color:#34d399;display:none;text-align:center"></p>
+    </div>
+  </div>
+
+  <script>
+  function openIssueModal() {
+    const m = document.getElementById('issueModal');
+    m.style.display = 'flex';
+    document.getElementById('issueTitle').focus();
+  }
+  function closeIssueModal() {
+    document.getElementById('issueModal').style.display = 'none';
+    document.getElementById('issueTitle').value = '';
+    document.getElementById('issueDesc').value = '';
+    document.getElementById('issueEmail').value = '';
+    document.getElementById('issueStatus').style.display = 'none';
+  }
+  async function submitIssue() {
+    const title = document.getElementById('issueTitle').value.trim();
+    const desc = document.getElementById('issueDesc').value.trim();
+    const email = document.getElementById('issueEmail').value.trim();
+    const severity = document.getElementById('issueSeverity').value;
+    const status = document.getElementById('issueStatus');
+    const btn = document.getElementById('issueSubmitBtn');
+
+    if (!title || !desc) {
+      status.textContent = 'Please fill in both title and description.';
+      status.style.color = '#ef4444';
+      status.style.display = 'block';
+      return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = 'Sending...';
+
+    try {
+      const baseUrl = localStorage.getItem('pk_base_url') || 'http://localhost:8400';
+      const res = await fetch(baseUrl + '/api/issues/report', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title, description: desc,
+          reporter_email: email || null,
+          page: window.location.pathname,
+          severity
+        })
+      });
+      const data = await res.json();
+      status.textContent = data.message || 'Issue submitted!';
+      status.style.color = '#34d399';
+      status.style.display = 'block';
+      setTimeout(() => closeIssueModal(), 2500);
+    } catch (e) {
+      status.textContent = 'Failed to submit. Please email varshinicb@vidyuthlabs.co.in directly.';
+      status.style.color = '#ef4444';
+      status.style.display = 'block';
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Submit Issue';
+    }
+  }
+
+  // ── UPI Upgrade ──────────────────────────────────────
+  function openUpgradeModal() {
+    document.getElementById('upgradeModal').style.display = 'flex';
+    document.getElementById('upgradeUtr').focus();
+    document.getElementById('upgradeStatus').style.display = 'none';
+  }
+  function closeUpgradeModal() {
+    document.getElementById('upgradeModal').style.display = 'none';
+    document.getElementById('upgradeUtr').value = '';
+  }
+  async function submitUpgrade() {
+    const utr = document.getElementById('upgradeUtr').value.trim();
+    const status = document.getElementById('upgradeStatus');
+    const btn = document.getElementById('upgradeSubmitBtn');
+
+    if (utr.length < 8) {
+      status.textContent = 'UTR must be at least 8 characters. Check your UPI app.';
+      status.style.color = '#ef4444';
+      status.style.display = 'block';
+      return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = 'Submitting...';
+
+    try {
+      const baseUrl = localStorage.getItem('pk_base_url') || 'http://localhost:8400';
+      const token = localStorage.getItem('pk_token');
+      const headers = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = 'Bearer ' + token;
+
+      const res = await fetch(baseUrl + '/api/billing/claim', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ upi_utr: utr })
+      });
+      const data = await res.json();
+
+      if (res.ok) {
+        status.textContent = data.message || 'Payment submitted! Your Maker tier will activate within 24 hours.';
+        status.style.color = '#34d399';
+      } else {
+        status.textContent = data.error?.message || 'Failed to submit. Please try again.';
+        status.style.color = '#ef4444';
+      }
+      status.style.display = 'block';
+      if (res.ok) setTimeout(() => closeUpgradeModal(), 3000);
+    } catch (e) {
+      status.textContent = 'Network error. Please check your connection.';
+      status.style.color = '#ef4444';
+      status.style.display = 'block';
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Submit & Activate';
+    }
+  }
+  </script>
 
   <script src="app.js"></script>
 </body>

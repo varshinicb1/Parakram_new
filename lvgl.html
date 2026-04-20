@@ -181,6 +181,10 @@
 
 <script>
 /* LVGL Hierarchical Data Model */
+const API = window.location.hostname.includes("github.io") 
+    ? "https://api.parakram.host" 
+    : window.location.origin;
+
 let rootNode = { id: "screen_1", idName: "screen_main", type: "screen", props: { w:320, h:240 }, children: [] };
 let selectedNode = null;
 let dragSourceType = null;
