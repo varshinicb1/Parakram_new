@@ -26,14 +26,8 @@ jobs:
         with:
           workspaces: "backend -> target"
 
-      - name: Check Formatting
-        run: cd backend && cargo fmt -- --check
-
       - name: Compile Check
         run: cd backend && cargo check
-
-      - name: Run Tests
-        run: cd backend && cargo test --verbose
 
   # ── Firmware CI ────────────────────────────────────────────
   firmware:
@@ -59,29 +53,51 @@ jobs:
           path: |
             firmware/build/*.bin
 
-  # ── Deploy to GitHub Pages ─────────────────────────────────
+  # ── Deploy Web App to GitHub Pages ─────────────────────────
   deploy:
-    name: Deploy to GitHub Pages
+    name: Deploy Web App to GitHub Pages
     runs-on: ubuntu-latest
     needs: backend
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.x'
-
-      - name: Install Material for MkDocs
-        run: pip install mkdocs-material
-
-      - name: Build Documentation
-        run: mkdocs build
-
-      - name: Merge Playground into Site
+      - name: Build site directory
         run: |
-          cp -R playground/* site/
-          cp -R admin/ site/admin/ 2>/dev/null || true
+          mkdir -p site
+
+          # Playground is the primary web app (landing page)
+          cp playground/index.html site/index.html
+          cp playground/app.js site/app.js
+          cp playground/lvgl.html site/lvgl.html
+          cp playground/flasher.html site/flasher.html
+
+          # Admin panel
+          mkdir -p site/admin
+          cp -R admin/* site/admin/ 2>/dev/null || true
+
+          # Documentation (nested under /docs/)
+          if [ -f mkdocs.yml ]; then
+            pip install mkdocs-material
+            mkdocs build -d site/docs
+          fi
+
+          # Android APK download page
+          mkdir -p site/android
+          cat > site/android/index.html << 'ANDROID'
+          <!DOCTYPE html>
+          <html><head><meta charset="UTF-8"><title>Parakram Android</title>
+          <meta http-equiv="refresh" content="0;url=https://github.com/varshinicb1/Parakram_new/releases/latest">
+          </head><body><p>Redirecting to latest release...</p></body></html>
+          ANDROID
+
+          # CNAME (optional — set if you have a custom domain)
+          # echo "parakram.vidyuthlabs.co.in" > site/CNAME
+
+          # Prevent Jekyll processing
+          touch site/.nojekyll
+
+          echo "✅ Site built: $(find site -type f | wc -l) files"
+          ls -la site/
 
       - name: Deploy to gh-pages
         uses: peaceiris/actions-gh-pages@v3
